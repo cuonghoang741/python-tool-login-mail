@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
+import csv
 import imaplib
 import email
 import threading
@@ -59,8 +60,17 @@ class GmailBrowserLoginTool:
         self.setup_ui()
         
     def setup_ui(self):
-        # Frame chính
-        main_frame = ttk.Frame(self.root, padding="10")
+        # Notebook (Tabs)
+        notebook = ttk.Notebook(self.root)
+        notebook.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        login_tab = ttk.Frame(notebook)
+        roboneo_tab = ttk.Frame(notebook)
+        notebook.add(login_tab, text="Đăng nhập Google")
+        notebook.add(roboneo_tab, text="Roboneo")
+
+        # Frame chính cho tab Đăng nhập
+        main_frame = ttk.Frame(login_tab, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Cấu hình grid
@@ -155,6 +165,8 @@ class GmailBrowserLoginTool:
         profiles_buttons.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5,0))
         self.open_profile_btn = ttk.Button(profiles_buttons, text="Mở Browser", command=self.open_selected_profile)
         self.open_profile_btn.pack(side=tk.LEFT)
+        self.login_roboneo_btn = ttk.Button(profiles_buttons, text="Login Roboneo", command=self.login_roboneo_selected)
+        self.login_roboneo_btn.pack(side=tk.LEFT, padx=10)
         self.delete_profile_btn = ttk.Button(profiles_buttons, text="Xóa Cache", command=self.delete_selected_profile)
         self.delete_profile_btn.pack(side=tk.LEFT, padx=10)
         
@@ -195,6 +207,43 @@ class GmailBrowserLoginTool:
         # Khởi tạo UI
         self.on_method_change()
         self._refresh_profiles_list()
+
+        # ================= Roboneo Tab =================
+        roboneo_container = ttk.Frame(roboneo_tab, padding="10")
+        roboneo_container.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        roboneo_container.columnconfigure(1, weight=1)
+
+        ttk.Label(roboneo_container, text="Chọn email:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.roboneo_email = tk.StringVar()
+        self.roboneo_email_combo = ttk.Combobox(roboneo_container, textvariable=self.roboneo_email, state="readonly")
+        self.roboneo_email_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5)
+
+        self.roboneo_random = tk.BooleanVar(value=False)
+        ttk.Checkbutton(roboneo_container, text="Random", variable=self.roboneo_random).grid(row=0, column=2, padx=10)
+
+        ttk.Label(roboneo_container, text="Ảnh:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.roboneo_image_path = tk.StringVar()
+        self.roboneo_image_entry = ttk.Entry(roboneo_container, textvariable=self.roboneo_image_path)
+        self.roboneo_image_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5)
+        ttk.Button(roboneo_container, text="Chọn ảnh", command=self._choose_image_file).grid(row=1, column=2, padx=10)
+
+        ttk.Label(roboneo_container, text="Prompt:").grid(row=2, column=0, sticky=tk.NW, pady=5)
+        self.roboneo_prompt = scrolledtext.ScrolledText(roboneo_container, height=6)
+        self.roboneo_prompt.grid(row=2, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        action_frame = ttk.Frame(roboneo_container)
+        action_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        ttk.Button(action_frame, text="Submit 1 mục", command=self._roboneo_submit).pack(side=tk.LEFT)
+        ttk.Button(action_frame, text="Chọn CSV", command=self._choose_csv_file).pack(side=tk.LEFT, padx=10)
+        ttk.Button(action_frame, text="Chạy CSV", command=self._roboneo_run_csv).pack(side=tk.LEFT)
+        
+        self.roboneo_csv_path = tk.StringVar()
+        ttk.Label(roboneo_container, text="CSV:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(roboneo_container, textvariable=self.roboneo_csv_path).grid(row=4, column=1, sticky=(tk.W, tk.E), pady=5)
+        ttk.Label(roboneo_container, text="Định dạng: file,promt").grid(row=4, column=2, sticky=tk.W)
+
+        # Cập nhật danh sách email cho combobox
+        self._refresh_roboneo_emails()
         
     def on_method_change(self):
         method = self.login_method.get()
@@ -561,6 +610,262 @@ class GmailBrowserLoginTool:
                 json.dump(self.profiles, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    # ====== Roboneo actions ======
+    def _choose_image_file(self):
+        try:
+            path = filedialog.askopenfilename(title="Chọn ảnh", filetypes=[
+                ("Image Files", "*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif"),
+                ("All Files", "*.*")
+            ])
+            if path:
+                self.roboneo_image_path.set(path)
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể chọn ảnh: {ex}")
+
+    def _roboneo_submit(self):
+        try:
+            email_addr = self.roboneo_email.get()
+            if self.roboneo_random.get():
+                keys = list(self.profiles.keys())
+                if not keys:
+                    messagebox.showinfo("Thông báo", "Chưa có tài khoản nào đã đăng nhập!")
+                    return
+                import random
+                email_addr = random.choice(keys)
+
+            if not email_addr:
+                messagebox.showerror("Lỗi", "Vui lòng chọn email!")
+                return
+
+            image_path = self.roboneo_image_path.get().strip()
+            prompt_text = self.roboneo_prompt.get("1.0", tk.END).strip()
+            if not image_path:
+                messagebox.showerror("Lỗi", "Vui lòng chọn ảnh!")
+                return
+            if not prompt_text:
+                messagebox.showerror("Lỗi", "Vui lòng nhập prompt!")
+                return
+
+            meta = self.profiles.get(email_addr)
+            if not meta:
+                messagebox.showerror("Lỗi", "Không tìm thấy thông tin cache của tài khoản!")
+                return
+
+            # Thực thi theo schema: mở roboneo.com và thực hiện upload + prompt
+            threading.Thread(target=self._roboneo_run_once_thread, args=(email_addr, meta, image_path, prompt_text), daemon=True).start()
+            messagebox.showinfo("Roboneo", f"Đã bắt đầu gửi yêu cầu với email: {email_addr}")
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Roboneo submit lỗi: {ex}")
+
+    def _choose_csv_file(self):
+        try:
+            path = filedialog.askopenfilename(title="Chọn CSV", filetypes=[("CSV", "*.csv"), ("All Files", "*.*")])
+            if path:
+                self.roboneo_csv_path.set(path)
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể chọn CSV: {ex}")
+
+    def _roboneo_run_csv(self):
+        try:
+            path = self.roboneo_csv_path.get().strip()
+            if not path:
+                messagebox.showerror("Lỗi", "Vui lòng chọn file CSV!")
+                return
+            rows = self._parse_csv_rows(path)
+            if not rows:
+                messagebox.showerror("Lỗi", "CSV rỗng hoặc không hợp lệ (định dạng: file,promt)!")
+                return
+
+            email_addr = self.roboneo_email.get()
+            if self.roboneo_random.get() or not email_addr:
+                keys = list(self.profiles.keys())
+                if not keys:
+                    messagebox.showinfo("Thông báo", "Chưa có tài khoản nào đã đăng nhập!")
+                    return
+                import random
+                email_addr = random.choice(keys)
+
+            meta = self.profiles.get(email_addr)
+            if not meta:
+                messagebox.showerror("Lỗi", "Không tìm thấy thông tin cache của tài khoản!")
+                return
+
+            threading.Thread(target=self._roboneo_run_csv_thread, args=(email_addr, meta, rows), daemon=True).start()
+            messagebox.showinfo("Roboneo", f"Bắt đầu chạy CSV với {len(rows)} dòng trên email: {email_addr}")
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Run CSV lỗi: {ex}")
+
+    def _parse_csv_rows(self, path):
+        rows = []
+        try:
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                for r in reader:
+                    if not r:
+                        continue
+                    # Hỗ trợ header "file","promt"
+                    if len(rows) == 0 and len(r) >= 2 and r[0].strip().lower() == 'file' and r[1].strip().lower() == 'promt':
+                        continue
+                    file_col = r[0].strip() if len(r) >= 1 else ''
+                    promt_col = r[1].strip() if len(r) >= 2 else ''
+                    if file_col or promt_col:
+                        rows.append({"file": file_col, "promt": promt_col})
+        except Exception:
+            return []
+        return rows
+
+    # ====== Roboneo automation ======
+    def _roboneo_run_once_thread(self, email_addr, meta, file_path, promt_text):
+        try:
+            self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: mở browser cho {email_addr}...", foreground="orange"))
+            drv = self._open_profile_and_get_driver(email_addr, meta)
+            wait = WebDriverWait(drv, 30)
+            drv.get("https://www.roboneo.com/home")
+
+            # Type prompt
+            try:
+                area = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[maxlength="1000"]')))
+                area.clear()
+                for ch in promt_text:
+                    area.send_keys(ch)
+                    time.sleep(random.uniform(0.01, 0.05))
+            except Exception:
+                pass
+
+            # Upload file: ảnh hoặc video
+            if file_path:
+                try:
+                    # Thử nút Add images
+                    self._try_click_upload(drv, wait, "Add images", file_path)
+                except Exception:
+                    try:
+                        # Thử nút Add video
+                        self._try_click_upload(drv, wait, "Add video", file_path)
+                    except Exception:
+                        pass
+
+            # Click gửi (nút send)
+            try:
+                send_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'HomeInputChat_send__')]")))
+                send_btn.click()
+            except Exception:
+                pass
+
+            self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: đã gửi yêu cầu", foreground="green"))
+        except Exception as ex:
+            self.root.after(0, lambda: self._login_error(f"Roboneo lỗi: {ex}"))
+
+    def _roboneo_run_csv_thread(self, email_addr, meta, rows):
+        try:
+            drv = self._open_profile_and_get_driver(email_addr, meta)
+            wait = WebDriverWait(drv, 30)
+            drv.get("https://www.roboneo.com/home")
+            for i, row in enumerate(rows):
+                promt_text = row.get('promt', '')
+                file_path = row.get('file', '')
+
+                # prompt
+                try:
+                    area = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[maxlength="1000"]')))
+                    area.clear()
+                    for ch in promt_text:
+                        area.send_keys(ch)
+                        time.sleep(random.uniform(0.01, 0.05))
+                except Exception:
+                    pass
+
+                # upload
+                if file_path:
+                    try:
+                        self._try_click_upload(drv, wait, "Add images", file_path)
+                    except Exception:
+                        try:
+                            self._try_click_upload(drv, wait, "Add video", file_path)
+                        except Exception:
+                            pass
+
+                # send
+                try:
+                    send_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'HomeInputChat_send__')]")))
+                    send_btn.click()
+                except Exception:
+                    pass
+
+                # chờ 5-10s mỗi lượt
+                time.sleep(random.uniform(5, 10))
+
+            self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: hoàn tất {len(rows)} mục", foreground="green"))
+        except Exception as ex:
+            self.root.after(0, lambda: self._login_error(f"Roboneo CSV lỗi: {ex}"))
+
+    def _try_click_upload(self, drv, wait, button_text, file_path):
+        # Tăng độ bền khi upload: thử nhiều cách bấm nút và nhiều input file
+        # 1) Thử click theo text chứa
+        clicked = False
+        for xp in [
+            f"//button[contains(., '{button_text}')]",
+            f"//div[contains(., '{button_text}')]",
+            f"//*[contains(text(), '{button_text}')]",
+        ]:
+            try:
+                btn = wait.until(EC.element_to_be_clickable((By.XPATH, xp)))
+                drv.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                time.sleep(0.2)
+                btn.click()
+                clicked = True
+                break
+            except Exception:
+                continue
+
+        # 2) Tìm tất cả input[type=file] có thể nhận file
+        candidates = []
+        try:
+            candidates = drv.find_elements(By.CSS_SELECTOR, "input[type='file']:not([disabled])")
+        except Exception:
+            candidates = []
+        
+        # 3) Ưu tiên input có thuộc tính accept phù hợp
+        prioritized = []
+        fallback = []
+        for el in candidates:
+            try:
+                accept = (el.get_attribute('accept') or '').lower()
+                if any(kw in accept for kw in ['image', '.png', '.jpg', '.jpeg', 'video', '.mp4', '.webm', '.mov']):
+                    prioritized.append(el)
+                else:
+                    fallback.append(el)
+            except Exception:
+                fallback.append(el)
+
+        for group in [prioritized, fallback]:
+            for input_file in group:
+                try:
+                    drv.execute_script("arguments[0].style.display='block'; arguments[0].style.visibility='visible';", input_file)
+                    time.sleep(0.2)
+                    input_file.send_keys(file_path)
+                    return
+                except Exception:
+                    continue
+        
+        # 4) Thử mở hệ thống upload qua label[for] nếu có
+        try:
+            labels = drv.find_elements(By.CSS_SELECTOR, 'label[for]')
+            for lb in labels:
+                try:
+                    for_id = lb.get_attribute('for')
+                    if not for_id:
+                        continue
+                    target = drv.find_element(By.ID, for_id)
+                    if target.get_attribute('type') == 'file':
+                        drv.execute_script("arguments[0].click();", lb)
+                        time.sleep(0.3)
+                        target.send_keys(file_path)
+                        return
+                except Exception:
+                    continue
+        except Exception:
+            pass
     
     def _remember_profile(self, email_addr, cache_dir, user_agent):
         if not email_addr:
@@ -582,6 +887,16 @@ class GmailBrowserLoginTool:
                 ts = meta.get("last_login")
                 time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else ""
                 self.profiles_list.insert(tk.END, f"{email_addr}  |  {time_str}")
+            self._refresh_roboneo_emails()
+        except Exception:
+            pass
+
+    def _refresh_roboneo_emails(self):
+        try:
+            emails = list(self.profiles.keys())
+            self.roboneo_email_combo['values'] = emails
+            if emails and not self.roboneo_email.get():
+                self.roboneo_email.set(emails[0])
         except Exception:
             pass
 
@@ -603,6 +918,22 @@ class GmailBrowserLoginTool:
         except Exception as ex:
             messagebox.showerror("Lỗi", f"Không thể mở browser: {ex}")
 
+    def login_roboneo_selected(self):
+        try:
+            sel = self.profiles_list.curselection()
+            if not sel:
+                messagebox.showinfo("Thông báo", "Vui lòng chọn một tài khoản trong danh sách!")
+                return
+            line = self.profiles_list.get(sel[0])
+            email_addr = line.split("  |  ")[0].strip()
+            meta = self.profiles.get(email_addr)
+            if not meta:
+                messagebox.showerror("Lỗi", "Không tìm thấy thông tin cache của tài khoản!")
+                return
+            threading.Thread(target=self._login_roboneo_thread, args=(email_addr, meta), daemon=True).start()
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể chạy login Roboneo: {ex}")
+
     def _open_profile_browser_thread(self, email_addr, meta):
         try:
             self.root.after(0, lambda: self.status_label.config(text=f"Đang mở browser cho {email_addr}...", foreground="orange"))
@@ -622,6 +953,52 @@ class GmailBrowserLoginTool:
             self.root.after(0, lambda: self.status_label.config(text=f"Đã mở browser cho {email_addr}", foreground="green"))
         except Exception as ex:
             self.root.after(0, lambda: self._login_error(f"Không thể mở profile browser: {ex}"))
+
+    def _open_profile_and_get_driver(self, email_addr, meta):
+        """Mở trình duyệt với profile và trả về driver để thao tác tiếp."""
+        chrome_options = Options()
+        cache_dir = meta.get("cache_dir")
+        if cache_dir and os.path.isdir(cache_dir):
+            chrome_options.add_argument(f"--user-data-dir={cache_dir}")
+            chrome_options.add_argument("--profile-directory=Default")
+        if meta.get("user_agent"):
+            chrome_options.add_argument(f"--user-agent={meta['user_agent']}")
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument("--lang=vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+        service = Service(ChromeDriverManager().install())
+        drv = webdriver.Chrome(service=service, options=chrome_options)
+        return drv
+
+    def _login_roboneo_thread(self, email_addr, meta):
+        try:
+            self.root.after(0, lambda: self.status_label.config(text=f"Roboneo login: mở browser cho {email_addr}...", foreground="orange"))
+            drv = self._open_profile_and_get_driver(email_addr, meta)
+            wait = WebDriverWait(drv, 20)
+            drv.get("https://www.roboneo.com/home")
+
+            # Kiểm tra nút Login theo class như đã cung cấp
+            def is_logged_in():
+                try:
+                    # Nếu không còn nút Log in thì coi như đã đăng nhập
+                    buttons = drv.find_elements(By.CSS_SELECTOR, 
+                        "button.Button_button_box__iXdKv.Button_plain__u3ul4.Button_normal__8WqPQ.UserCard_noLoginBox__XWhP8")
+                    if len(buttons) == 0:
+                        return True
+                    return False
+                except Exception:
+                    return False
+
+            # Đợi người dùng tự đăng nhập (tối đa 5 phút), kiểm tra mỗi 5s
+            start = time.time()
+            while time.time() - start < 300:
+                if is_logged_in():
+                    self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: đã đăng nhập", foreground="green"))
+                    return
+                time.sleep(5)
+
+            self.root.after(0, lambda: self._login_error("Roboneo: Hết thời gian chờ đăng nhập (5 phút)"))
+        except Exception as ex:
+            self.root.after(0, lambda: self._login_error(f"Roboneo login lỗi: {ex}"))
 
     def delete_selected_profile(self):
         try:
