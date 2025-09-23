@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>GoogleFlowTool</string>
 	<key>CFBundleIconFile</key>
-	<string>generated-0f38492a538a093d2fa5d75e6fb4831fdcef2d5f3a6e525a2e6ead91deca5cae.icns</string>
+	<string>icon-windowed.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>GoogleFlowTool</string>
 	<key>CFBundleInfoDictionaryVersion</key>

@@ -1,21 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = [('chrome_cache', 'chrome_cache')]
-binaries = []
-hiddenimports = ['selenium', 'webdriver_manager', 'tkinter', 'tkinter.ttk', 'tkinter.scrolledtext', 'tkinter.filedialog', 'tkinter.messagebox', 'threading', 'json', 'urllib.request', 'pathlib', 'os', 're', 'time', 'random']
-tmp_ret = collect_all('selenium')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('webdriver_manager')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['flow_browser_tool.py'],
     pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -41,7 +32,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['logo.png'],
 )
 coll = COLLECT(
     exe,
@@ -55,6 +45,6 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='GoogleFlowTool.app',
-    icon='logo.png',
+    icon=None,
     bundle_identifier=None,
 )

@@ -25,7 +25,7 @@ class FlowBrowserTool:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("🎬 Google Flow Tool")
-        self.root.geometry("1000x750")
+        self.root.geometry("900x650")
         self.root.resizable(True, True)
         
         # Configure modern style
@@ -33,24 +33,24 @@ class FlowBrowserTool:
         self.style.theme_use('clam')
         
         # Configure colors and fonts
-        self.style.configure('Title.TLabel', font=('Segoe UI', 20, 'bold'), foreground='#2E86AB')
-        self.style.configure('Subtitle.TLabel', font=('Segoe UI', 12, 'bold'), foreground='#34495E')
-        self.style.configure('Success.TLabel', foreground='#27AE60', font=('Segoe UI', 10))
-        self.style.configure('Error.TLabel', foreground='#E74C3C', font=('Segoe UI', 10))
-        self.style.configure('Info.TLabel', foreground='#3498DB', font=('Segoe UI', 10))
-        self.style.configure('Warning.TLabel', foreground='#F39C12', font=('Segoe UI', 10))
+        self.style.configure('Title.TLabel', font=('Segoe UI', 16, 'bold'), foreground='#2E86AB')
+        self.style.configure('Subtitle.TLabel', font=('Segoe UI', 10, 'bold'), foreground='#34495E')
+        self.style.configure('Success.TLabel', foreground='#27AE60', font=('Segoe UI', 9))
+        self.style.configure('Error.TLabel', foreground='#E74C3C', font=('Segoe UI', 9))
+        self.style.configure('Info.TLabel', foreground='#3498DB', font=('Segoe UI', 9))
+        self.style.configure('Warning.TLabel', foreground='#F39C12', font=('Segoe UI', 9))
         
         # Configure button styles
-        self.style.configure('Primary.TButton', font=('Segoe UI', 10, 'bold'), padding=(15, 8))
-        self.style.configure('Secondary.TButton', font=('Segoe UI', 9), padding=(10, 6))
-        self.style.configure('Accent.TButton', font=('Segoe UI', 11, 'bold'), padding=(20, 10))
+        self.style.configure('Primary.TButton', font=('Segoe UI', 9, 'bold'), padding=(10, 6))
+        self.style.configure('Secondary.TButton', font=('Segoe UI', 9), padding=(8, 4))
+        self.style.configure('Accent.TButton', font=('Segoe UI', 10, 'bold'), padding=(14, 8))
         
         # Configure frame styles
         self.style.configure('Card.TFrame', relief='raised', borderwidth=1)
         self.style.configure('Card.TLabelFrame', relief='raised', borderwidth=1)
         
         # Configure notebook style
-        self.style.configure('TNotebook.Tab', padding=[20, 12], font=('Segoe UI', 11, 'bold'))
+        self.style.configure('TNotebook.Tab', padding=[14, 8], font=('Segoe UI', 10, 'bold'))
         self.style.configure('TNotebook', tabmargins=[2, 5, 2, 0])
         
         # Set background color
@@ -62,6 +62,13 @@ class FlowBrowserTool:
         self.current_cache_dir = None
         self.current_user_agent = None
         self.login_success = False
+        # Execution state & queue
+        self.exec_driver = None
+        self.stop_exec = False
+        self.exec_queue = []
+        self.queue_running = False
+        self.exec_driver = None
+        self.stop_exec = False
 
         # Profiles (cache per email)
         self.flow_profiles_path = os.path.join(os.getcwd(), "chrome_cache", "flow_profiles.json")
@@ -161,11 +168,51 @@ class FlowBrowserTool:
 
         self._refresh_profiles_list()
 
-        # ===== Execute Tab =====
-        ex = ttk.Frame(exec_tab, padding="20")
-        ex.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        # ===== Execute Tab (scrollable) =====
+        # Container with canvas + vertical scrollbar
         exec_tab.columnconfigure(0, weight=1)
         exec_tab.rowconfigure(0, weight=1)
+        ex_container = ttk.Frame(exec_tab)
+        ex_container.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        ex_container.columnconfigure(0, weight=1)
+        ex_container.rowconfigure(0, weight=1)
+
+        ex_canvas = tk.Canvas(ex_container, highlightthickness=0)
+        ex_vscroll = ttk.Scrollbar(ex_container, orient=tk.VERTICAL, command=ex_canvas.yview)
+        ex_canvas.configure(yscrollcommand=ex_vscroll.set)
+        ex_canvas.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        ex_vscroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
+
+        # Inner frame that holds all actual content
+        ex = ttk.Frame(ex_canvas, padding="20")
+        ex_id = ex_canvas.create_window((0, 0), window=ex, anchor="nw")
+
+        # Update scrollregion when frame size changes
+        def _on_ex_configure(event):
+            try:
+                ex_canvas.configure(scrollregion=ex_canvas.bbox("all"))
+                # Keep inner frame width in sync with canvas width
+                ex_canvas.itemconfigure(ex_id, width=ex_canvas.winfo_width())
+            except Exception:
+                pass
+        ex.bind("<Configure>", _on_ex_configure)
+
+        # Enable mousewheel scrolling over the canvas
+        def _bind_mousewheel(widget):
+            def _on_mousewheel(e):
+                try:
+                    delta = -1 * (e.delta // 120) if e.delta else (1 if e.num == 5 else -1)
+                    ex_canvas.yview_scroll(delta, "units")
+                except Exception:
+                    pass
+                return "break"
+            try:
+                widget.bind_all("<MouseWheel>", _on_mousewheel)
+                widget.bind_all("<Button-4>", _on_mousewheel)
+                widget.bind_all("<Button-5>", _on_mousewheel)
+            except Exception:
+                pass
+        _bind_mousewheel(ex_canvas)
         for i in range(3):
             ex.columnconfigure(i, weight=1)
         ex.rowconfigure(2, weight=1)  # Prompt text area expandable
@@ -241,12 +288,13 @@ class FlowBrowserTool:
         self.outputs_per_prompt.grid(row=1, column=3, sticky=(tk.W, tk.E), pady=(8, 0))
 
         ttk.Label(cfg, text="Model", style='Subtitle.TLabel').grid(row=1, column=4, sticky=tk.W, pady=(8, 0))
+        # Model order must follow popover order to keep index/text consistent
         self.model_choice = ttk.Combobox(
             cfg,
             values=[
                 "Veo 3 - Fast",
-                "Veo 3 - Quality",
                 "Veo 2 - Fast",
+                "Veo 3 - Quality",
                 "Veo 2 - Quality",
             ],
             state="readonly"
@@ -258,12 +306,55 @@ class FlowBrowserTool:
         action_frame = ttk.Frame(ex)
         action_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
         
-        ttk.Button(action_frame, text="▶️ Execute", command=self._execute_workflow, style='Accent.TButton').pack(side=tk.LEFT)
+        ttk.Button(action_frame, text="⏹️ Stop", command=self._stop_execution, style='Secondary.TButton').pack(side=tk.RIGHT, padx=(0, 10))
+        ttk.Button(action_frame, text="▶️ Execute", command=self._execute_workflow, style='Accent.TButton').pack(side=tk.RIGHT)
 
         self.exec_status = ttk.Label(ex, text="✅ Sẵn sàng", style='Success.TLabel')
         self.exec_status.grid(row=7, column=0, columnspan=3, sticky=tk.W)
 
+        # Jobs view (running + queue)
+        jobs_frame = ttk.LabelFrame(ex, text="📋 Tiến trình", padding="10")
+        jobs_frame.grid(row=8, column=0, columnspan=3, sticky=(tk.W, tk.E))
+        jobs_frame.columnconfigure(0, weight=1)
+        jobs_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(jobs_frame, text="Đang chạy", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(jobs_frame, text="Đang đợi", style='Subtitle.TLabel').grid(row=0, column=1, sticky=tk.W)
+
+        # Running table
+        run_cols = ("Email", "Workflow", "Image", "Prompt")
+        self.running_tree = ttk.Treeview(jobs_frame, columns=run_cols, show='headings', height=2)
+        for c, w in zip(run_cols, (180, 120, 160, 360)):
+            self.running_tree.heading(c, text=c)
+            self.running_tree.column(c, width=w, anchor=tk.W)
+        self.running_tree.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+        run_scroll_x = ttk.Scrollbar(jobs_frame, orient=tk.HORIZONTAL, command=self.running_tree.xview)
+        self.running_tree.configure(xscrollcommand=run_scroll_x.set)
+        run_scroll_x.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+
+        # Queue table
+        self.queue_tree = ttk.Treeview(jobs_frame, columns=run_cols, show='headings', height=4)
+        for c, w in zip(run_cols, (180, 120, 160, 360)):
+            self.queue_tree.heading(c, text=c)
+            self.queue_tree.column(c, width=w, anchor=tk.W)
+        self.queue_tree.grid(row=1, column=1, sticky=(tk.W, tk.E))
+        queue_scroll_x = ttk.Scrollbar(jobs_frame, orient=tk.HORIZONTAL, command=self.queue_tree.xview)
+        self.queue_tree.configure(xscrollcommand=queue_scroll_x.set)
+        queue_scroll_x.grid(row=2, column=1, sticky=(tk.W, tk.E))
+
+        # Progress log card
+        log_frame = ttk.LabelFrame(ex, text="📜 Log tiến trình", padding="10")
+        log_frame.grid(row=9, column=0, columnspan=3, sticky=(tk.N, tk.S, tk.W, tk.E))
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        self.exec_log = scrolledtext.ScrolledText(log_frame, height=8, wrap=tk.WORD, state='disabled')
+        self.exec_log.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        ex.rowconfigure(9, weight=1)
+
         self._refresh_exec_emails()
+        # Initialize jobs view
+        self.exec_current_job = None
+        self._refresh_jobs_view()
 
     # ===================== Responsive Helpers =====================
     def _on_window_resize(self, event):
@@ -288,14 +379,20 @@ class FlowBrowserTool:
         """Adjust font sizes based on window size"""
         try:
             if size_mode == "small":
-                font_size = 9
-                title_size = 14
+                font_size = 8
+                title_size = 13
+                tab_font = ("Segoe UI", 9, "bold")
+                btn_font = ("Segoe UI", 9, "bold")
             elif size_mode == "large":
                 font_size = 11
                 title_size = 18
+                tab_font = ("Segoe UI", 11, "bold")
+                btn_font = ("Segoe UI", 11, "bold")
             else:  # normal
-                font_size = 10
-                title_size = 16
+                font_size = 9
+                title_size = 15
+                tab_font = ("Segoe UI", 10, "bold")
+                btn_font = ("Segoe UI", 10, "bold")
             
             # Update title font
             if hasattr(self, 'title'):
@@ -314,6 +411,14 @@ class FlowBrowserTool:
             # Update text area font
             if hasattr(self, 'prompt_text'):
                 self.prompt_text.config(font=("Arial", font_size))
+
+            # Update style fonts dynamically for notebook tabs and buttons
+            try:
+                self.style.configure('TNotebook.Tab', font=tab_font)
+                self.style.configure('Accent.TButton', font=btn_font)
+                self.style.configure('Primary.TButton', font=btn_font)
+            except Exception:
+                pass
                 
         except Exception:
             pass  # Ignore font adjustment errors
@@ -543,13 +648,37 @@ class FlowBrowserTool:
         prompt = self.prompt_text.get("1.0", tk.END).strip()
         media = (self.media_paths.get() or "").strip()
         wf = self.workflow.get()
-
-        threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media), daemon=True).start()
+        # Validate inputs
+        if not prompt:
+            messagebox.showerror("Lỗi", "Vui lòng nhập Prompt!")
+            return
+        if wf == "frames_to_video" and not media:
+            messagebox.showerror("Lỗi", "Workflow 'Frames to Video' yêu cầu chọn 1 ảnh!")
+            return
+        # Build a job
+        job = {"email": email_addr, "meta": meta, "wf": wf, "prompt": prompt, "media": media}
+        # If running, enqueue; else start and mark running
+        if self.exec_driver is not None or self.queue_running:
+            self.exec_queue.append(job)
+            self.queue_running = True
+            self._log_exec(f"Queued job for {email_addr} ({wf})")
+            self._refresh_jobs_view()
+        else:
+            self.queue_running = True
+            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media), daemon=True).start()
 
     def _execute_thread(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str) -> None:
         try:
             self._log_exec("Opening Flow page...")
             drv = self._open_profile_driver(meta)
+            self.exec_driver = drv
+            self.stop_exec = False
+            # set current job and refresh view
+            try:
+                self.exec_current_job = {"email": email_addr, "wf": wf, "prompt": prompt, "media": media}
+                self._refresh_jobs_view()
+            except Exception:
+                pass
             wait = WebDriverWait(drv, 30)
             drv.get("https://labs.google/fx/vi/tools/flow")
             loaded = self._wait_until(lambda: "labs.google" in drv.current_url, timeout=120)
@@ -654,6 +783,8 @@ class FlowBrowserTool:
                     time.sleep(10)
                     self._log_exec("Monitoring processing and then reading API logs...")
                     self._monitor_and_fetch_api(drv)
+                    # ĐÃ HOÀN TẤT Frames to Video: return ngay để không chạy các bước Submit/Monitor chung bên dưới
+                    return
                 except Exception:
                     self._log_exec("Could not confirm crop/save or detect first frame", error=True)
 
@@ -667,9 +798,78 @@ class FlowBrowserTool:
                 "//*[contains(text(), 'Generate')]",
             ])
 
-            self._log_exec("Request submitted. Check results in Flow.", success=True)
+            self._log_exec("Request submitted. Monitoring for completion...", success=False)
+            # For all workflows, monitor until outputs ready, then read API
+            try:
+                # small delay to allow rendering to start
+                time.sleep(5)
+                self._monitor_and_fetch_api(drv)
+            except Exception as ex:
+                self._log_exec(f"Monitor error: {ex}", error=True)
         except Exception as ex:
             self._log_exec(f"Execute error: {ex}", error=True)
+        finally:
+            try:
+                if self.exec_driver is not None:
+                    self.exec_driver.quit()
+            except Exception:
+                pass
+            self.exec_driver = None
+            self.stop_exec = False
+            # clear current job and refresh
+            try:
+                self.exec_current_job = None
+                self._refresh_jobs_view()
+            except Exception:
+                pass
+
+            # Auto-run next queued job if available
+            try:
+                next_job = None
+                if self.exec_queue:
+                    next_job = self.exec_queue.pop(0)
+                if next_job:
+                    self._log_exec(f"Starting next queued job for {next_job['email']} ({next_job['wf']})")
+                    threading.Thread(
+                        target=self._execute_thread,
+                        args=(next_job['email'], next_job['meta'], next_job['wf'], next_job['prompt'], next_job['media']),
+                        daemon=True,
+                    ).start()
+                else:
+                    self.queue_running = False
+                    self._log_exec("All jobs completed", success=True)
+            except Exception as ex:
+                self.queue_running = False
+                self._log_exec(f"Queue scheduling error: {ex}", error=True)
+
+    def _refresh_jobs_view(self) -> None:
+        try:
+            # Helper to format row data
+            def fmt_row(job):
+                try:
+                    img = os.path.basename(job.get('media') or '') if job.get('media') else ''
+                except Exception:
+                    img = ''
+                prompt = (job.get('prompt') or '').replace('\n', ' ').strip()
+                if len(prompt) > 120:
+                    prompt = prompt[:117] + '...'
+                return (job.get('email') or '', job.get('wf') or '', img, prompt)
+
+            # Running table
+            if hasattr(self, 'running_tree'):
+                for i in self.running_tree.get_children():
+                    self.running_tree.delete(i)
+                if self.exec_current_job:
+                    self.running_tree.insert('', tk.END, values=fmt_row(self.exec_current_job))
+
+            # Queue table
+            if hasattr(self, 'queue_tree'):
+                for i in self.queue_tree.get_children():
+                    self.queue_tree.delete(i)
+                for j in self.exec_queue:
+                    self.queue_tree.insert('', tk.END, values=fmt_row(j))
+        except Exception:
+            pass
 
     # ===================== Selenium Utils =====================
     def _flow_requires_login(self, driver: webdriver.Chrome) -> bool:
@@ -1082,15 +1282,31 @@ class FlowBrowserTool:
                 continue
 
     def _log_exec(self, message: str, success: bool = False, error: bool = False) -> None:
-        """Log ra console và cập nhật nhãn trạng thái trên tab Execute."""
+        """Print to console, update status label, and append to on-screen log."""
         prefix = "[EXEC]"
         print(f"{prefix} {message}")
+        # Append to UI log
+        try:
+            self._append_exec_log(f"{prefix} {message}\n")
+        except Exception:
+            pass
         if error:
             self._set_exec_status(message, "red")
         elif success:
             self._set_exec_status(message, "green")
         else:
             self._set_exec_status(message, "orange")
+
+    def _append_exec_log(self, text: str) -> None:
+        """Append text to the progress log textbox and auto-scroll to bottom."""
+        try:
+            if hasattr(self, 'exec_log'):
+                self.exec_log.configure(state='normal')
+                self.exec_log.insert(tk.END, text)
+                self.exec_log.see(tk.END)
+                self.exec_log.configure(state='disabled')
+        except Exception:
+            pass
 
     def _open_frames_upload_panel(self, driver: webdriver.Chrome) -> None:
         """Mở panel thêm media cho workflow Frames to Video theo mô tả UI.
@@ -1154,6 +1370,7 @@ class FlowBrowserTool:
                 return len(driver.find_elements(By.XPATH, "//button[.//span[normalize-space(text())='Khung hình đầu tiên']]") ) > 0
             except Exception:
                 return False
+        # Thời gian chờ tối đa cho upload + crop preview là 60s
         ok = self._wait_until(first_frame_ready, timeout=60, interval=0.5)
         if not ok:
             raise Exception("First frame not detected after crop/save")
@@ -1203,37 +1420,136 @@ class FlowBrowserTool:
                 raise Exception(f"Failed to click Create button: {ex}")
 
     def _monitor_and_fetch_api(self, driver: webdriver.Chrome) -> None:
-        """Theo dõi xử lý đến khi có video, sau đó reload trang và đọc API project.searchProjectWorkflows
-        để lấy danh sách fifeUri, sau đó tải về máy."""
-        # Chờ đến khi xuất hiện ít nhất 1 video (hoàn tất)
-        def any_video_ready():
+        """Theo dõi xử lý đến khi đủ video hoàn tất theo cấu hình Outputs per prompt,
+        sau đó reload trang (nếu cần) và đọc API project.searchProjectWorkflows để lấy fifeUri."""
+        # Số video kỳ vọng theo cấu hình Outputs per prompt (mặc định 1)
+        try:
+            expected_videos = int((self.outputs_per_prompt.get() or "1").strip())
+            if expected_videos <= 0:
+                expected_videos = 1
+        except Exception:
+            expected_videos = 1
+
+        def is_any_running_or_progress():
+            """Kiểm tra còn trạng thái đang chạy không (nhãn 'running' hoặc %)."""
             try:
-                return len(driver.find_elements(By.TAG_NAME, 'video')) > 0
+                # Nhãn 'running'
+                running = driver.find_elements(By.XPATH, "//*[contains(translate(normalize-space(text()), 'RUNNING', 'running'), 'running') or contains(@class,'running')]")
+            except Exception:
+                running = []
+            try:
+                # Bất kỳ text có dấu % (tiến trình)
+                percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
+            except Exception:
+                percents = []
+            return (len(running) > 0) or (len(percents) > 0)
+
+        def list_videos():
+            try:
+                return driver.find_elements(By.TAG_NAME, 'video')
+            except Exception:
+                return []
+
+        def is_card_ready_from_video(video_el):
+            """Card ready nếu tổ tiên có nút hành động đặc trưng (download/fullscreen/more/Thêm vào cảnh)."""
+            try:
+                node = video_el
+                for _ in range(6):
+                    try:
+                        node = node.find_element(By.XPATH, "..")
+                    except Exception:
+                        break
+                    actions = node.find_elements(By.XPATH, 
+                        ".//button[.//i[normalize-space(text())='download'] or .//span[contains(., 'Tải xuống')] or .//i[normalize-space(text())='fullscreen'] or .//i[normalize-space(text())='more_vert'] or .//span[contains(., 'Thêm vào cảnh')]]"
+                    )
+                    if actions:
+                        return True
+                return False
             except Exception:
                 return False
 
-        # Poll tối đa 5 phút
-        start = time.time()
-        while time.time() - start < 300:
-            # Log phần trăm nếu tìm thấy
+        # Bỏ phát hiện lỗi theo text; chỉ dựa vào timeout và API
+
+        def all_videos_ready():
             try:
+                vids = list_videos()
+                if len(vids) < expected_videos:
+                    return False
+                # Khi đủ số lượng video, đảm bảo không còn trạng thái running/progress
+                if is_any_running_or_progress():
+                    return False
+                # Từng card phải có nút hành động (đã ready)
+                ready = 0
+                for v in vids:
+                    if is_card_ready_from_video(v):
+                        ready += 1
+                if ready < expected_videos:
+                    return False
+                return True
+            except Exception:
+                return False
+
+        # Poll tối đa 4 phút (240s) cho giai đoạn xử lý
+        start = time.time()
+        stable_zero_checks = 0
+        while time.time() - start < 240:
+            if self.stop_exec:
+                self._log_exec("Stopped by user during monitoring")
+                return
+            try:
+                vids = list_videos()
+                total = max(len(vids), expected_videos)
+                ready_cnt = 0
+                for v in vids:
+                    if is_card_ready_from_video(v):
+                        ready_cnt += 1
+                processing = max(0, total - ready_cnt)
+                # Tổng thời gian đã đếm (mm:ss)
+                try:
+                    elapsed = int(time.time() - start)
+                    elapsed_str = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
+                except Exception:
+                    elapsed_str = "00:00"
+                self._log_exec(f"Processing status: remaining {processing}/{total} | elapsed {elapsed_str}")
+                # Nếu không còn processing, tăng đếm ổn định
+                if processing == 0 and total >= expected_videos:
+                    stable_zero_checks += 1
+                else:
+                    stable_zero_checks = 0
+                # Log phần trăm nếu có
                 percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
                 if percents:
                     txt = percents[0].text.strip()
                     if txt.endswith('%'):
-                        self._log_exec(f"Processing... {txt}")
+                        self._log_exec(f"Progress hint: {txt}")
             except Exception:
                 pass
 
-            if any_video_ready():
+            # Điều kiện kết thúc: tất cả ready theo rule hoặc 2 lần liên tiếp remaining==0
+            if all_videos_ready() or stable_zero_checks >= 2:
                 break
-            time.sleep(3)
+            time.sleep(5)
 
-        # Thu thập các card chứa video
-        videos = driver.find_elements(By.TAG_NAME, 'video')
-        if not videos:
-            self._log_exec("No videos detected after processing window", error=True)
-            return
+        # Kiểm tra lần cuối
+        videos = list_videos()
+        if len(videos) < expected_videos or is_any_running_or_progress():
+            # Fallback heuristic: nếu thấy card kết quả đã hiện model + prompt (đã hoàn tất), vẫn tiếp tục
+            try:
+                summary_cards = driver.find_elements(By.XPATH, "//*[contains(@class,'sc-43558102-9') or contains(., 'Veo ')][contains(., '-')]")
+                if summary_cards:
+                    self._log_exec("Detected summary cards; proceeding to read API")
+                else:
+                    self._log_exec("Not all videos are ready yet; proceeding best-effort with available results")
+            except Exception:
+                self._log_exec("Not all videos are ready yet; proceeding best-effort with available results")
+
+        # Reload trước khi đọc API để đồng bộ trạng thái
+        try:
+            self._log_exec("Reloading page to finalize state before reading API...")
+            driver.refresh()
+            time.sleep(2)
+        except Exception:
+            pass
 
         self._log_exec(f"Found {len(videos)} video(s). Reading Network logs for API JSON...")
         try:
@@ -1275,8 +1591,41 @@ class FlowBrowserTool:
         if all_urls:
             self._log_exec(f"Found {len(all_urls)} media URL(s) in Network logs. Downloading...")
             self._download_files(all_urls)
+            # Đánh dấu hoàn tất sau khi tải xong; phần finally sẽ đóng browser và chạy job kế tiếp
+            try:
+                self._log_exec("Job completed. Closing browser now and continuing queue...", success=True)
+                # Đóng browser ngay sau khi tải xong
+                try:
+                    if self.exec_driver is not None:
+                        self.exec_driver.quit()
+                except Exception:
+                    pass
+                # Trả về để khép tiến trình; finally trong _execute_thread sẽ lên lịch job tiếp theo
+                return
+            except Exception:
+                pass
         else:
-            self._log_exec("No API JSON found in Network logs or no media URLs extracted", error=True)
+            # Không có URL từ API => coi như failed và báo người dùng
+            self._log_exec("No API JSON or no media URLs extracted - marking as failed", error=True)
+            try:
+                messagebox.showerror("Thất bại", "Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.")
+            except Exception:
+                pass
+
+    def _stop_execution(self) -> None:
+        """Stop current execution and close browser if running."""
+        try:
+            self.stop_exec = True
+            self._log_exec("Stopping execution and closing browser...")
+            if self.exec_driver is not None:
+                try:
+                    self.exec_driver.quit()
+                except Exception:
+                    pass
+                self.exec_driver = None
+            self._set_exec_status("Stopped", "red")
+        except Exception:
+            pass
 
     def _extract_fife_uris_from_api_json(self, payload):
         urls = []
@@ -1321,7 +1670,10 @@ class FlowBrowserTool:
                     self._log_exec(f"Downloaded {filename}", success=True)
                 except Exception as ex:
                     self._log_exec(f"Failed to download #{i}: {ex}", error=True)
-            messagebox.showinfo("Hoàn tất", f"Đã tải {len(urls)} file về: {out_dir}")
+            try:
+                messagebox.showinfo("Hoàn tất", f"Đã tải {len(urls)} file về: {out_dir}")
+            except Exception:
+                pass
         except Exception as ex:
             self._log_exec(f"Download error: {ex}", error=True)
 
@@ -1353,48 +1705,73 @@ class FlowBrowserTool:
 
         # Helper chọn từ combobox theo nhãn
         def select_from_combobox(label_texts, option_texts):
-            # Tìm combobox có label tương ứng
+            # Tìm combobox có label tương ứng và thao tác trên listbox theo aria-controls của chính combobox đó
             for label_text in label_texts:
                 try:
                     combo = driver.find_element(By.XPATH, f"//button[@role='combobox'][.//span[normalize-space(text())='{label_text}']]")
                     self._log_exec(f"Opening combobox: {label_text}...")
+                    # Lấy id listbox mục tiêu từ aria-controls (Radix Select gán id động: radix-:xxx:)
+                    aria_controls = combo.get_attribute("aria-controls") or ""
                     self._human_click_el(driver, combo)
-                    # Đợi popover listbox mở
-                    try:
-                        WebDriverWait(driver, 5).until(
-                            EC.presence_of_element_located((By.XPATH, "//*[@role='listbox' and @data-state='open' or @data-state='checked' or @data-state='unchecked' or @id]"))
-                        )
-                    except Exception:
-                        pass
-                    # mở listbox và chọn option theo text (ưu tiên match chính xác span)
-                    for opt_text in option_texts:
-                        # Thử match exact trong span
-                        for xp in [
-                            f"//*[@role='listbox']//span[normalize-space(text())='{opt_text}']",
-                            f"//*[@role='listbox']//*[contains(., '{opt_text}')]",
-                        ]:
-                            try:
-                                el = driver.find_element(By.XPATH, xp)
-                                self._human_click_el(driver, el)
-                                time.sleep(0.2)
-                                return True
-                            except Exception:
-                                continue
-                    # Nếu chưa tìm thấy, thử scroll viewport của listbox rồi tìm lại
-                    try:
-                        viewport = driver.find_element(By.CSS_SELECTOR, "[data-radix-select-viewport]")
-                        driver.execute_script("arguments[0].scrollTop = 0;", viewport)
-                        time.sleep(0.1)
+                    # Đợi đúng listbox của combobox này mở ra
+                    target_listbox = None
+                    if aria_controls:
+                        try:
+                            target_listbox = WebDriverWait(driver, 7).until(
+                                EC.presence_of_element_located((By.ID, aria_controls))
+                            )
+                        except Exception:
+                            target_listbox = None
+                    if target_listbox is None:
+                        # Fallback: lấy listbox gần nhất sau khi mở
+                        try:
+                            target_listbox = WebDriverWait(driver, 5).until(
+                                EC.presence_of_element_located((By.XPATH, "//*[@role='listbox']"))
+                            )
+                        except Exception:
+                            target_listbox = None
+
+                    # Chọn option theo text bên trong listbox mục tiêu
+                    if target_listbox is not None:
+                        try:
+                            driver.execute_script("arguments[0].scrollTop = 0;", target_listbox)
+                        except Exception:
+                            pass
                         for opt_text in option_texts:
                             try:
-                                el = driver.find_element(By.XPATH, f"//*[@role='listbox']//span[normalize-space(text())='{opt_text}']")
+                                # Ưu tiên match exact theo span trong listbox mục tiêu
+                                el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{opt_text}']]")
+                                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
                                 self._human_click_el(driver, el)
                                 time.sleep(0.2)
                                 return True
                             except Exception:
-                                continue
-                    except Exception:
-                        pass
+                                # Fallback: contains text
+                                try:
+                                    el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
+                                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                                    self._human_click_el(driver, el)
+                                    time.sleep(0.2)
+                                    return True
+                                except Exception:
+                                    continue
+
+                        # Nếu vẫn chưa tìm thấy, thử viewport nội bộ của Radix để scroll
+                        try:
+                            viewport = target_listbox.find_element(By.CSS_SELECTOR, "[data-radix-select-viewport]")
+                            driver.execute_script("arguments[0].scrollTop = 0;", viewport)
+                            time.sleep(0.1)
+                            for opt_text in option_texts:
+                                try:
+                                    el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{opt_text}']]")
+                                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                                    self._human_click_el(driver, el)
+                                    time.sleep(0.2)
+                                    return True
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
                 except Exception:
                     continue
             return False
@@ -1406,12 +1783,24 @@ class FlowBrowserTool:
             "1:1": ["Vuông (1:1)", "Square (1:1)"],
         }
         select_from_combobox(["Tỷ lệ khung hình", "Aspect ratio"], aspect_map.get(aspect, [aspect]))
+        time.sleep(1)
 
         # 2) Outputs per prompt
         select_from_combobox(["Câu trả lời đầu ra cho mỗi câu lệnh", "Outputs per prompt"], [outputs])
+        time.sleep(1)
 
         # 3) Model
-        select_from_combobox(["Mô hình", "Model"], [model])
+        # Cố gắng chọn chính xác model và xác thực kết quả hiển thị. Nếu lệch, thử theo index.
+        ok_model = self._select_model_strict(driver, model)
+        time.sleep(1)
+        if not ok_model:
+            # Fallback: thử helper tổng quát + chọn trực tiếp trong listbox
+            tried = select_from_combobox(["Mô hình", "Model"], [model])
+            if not tried:
+                try:
+                    self._select_radix_option_by_text(driver, model)
+                except Exception:
+                    pass
 
     def _wait_until(self, predicate, timeout: int = 60, interval: float = 1.0) -> bool:
         start = time.time()
@@ -1423,6 +1812,186 @@ class FlowBrowserTool:
                 pass
             time.sleep(interval)
         return False
+    
+    def _select_model_strict(self, driver: webdriver.Chrome, model_text: str) -> bool:
+        """Chọn model với xác thực sau click: mở combobox 'Mô hình', chọn option theo text,
+        nếu lệch sẽ chọn lại theo đúng thứ tự (1: Veo 3 - Fast, 2: Veo 2 - Fast, 3: Veo 3 - Quality, 4: Veo 2 - Quality).
+        """
+        try:
+            def get_model_combo():
+                try:
+                    return driver.find_element(By.XPATH, "//button[@role='combobox'][.//span[normalize-space(text())='Mô hình' or normalize-space(text())='Model']]")
+                except Exception:
+                    return None
+
+            def read_combo_value(combo_el):
+                try:
+                    # Lấy span hiển thị giá trị (thường là span sau label)
+                    spans = combo_el.find_elements(By.XPATH, ".//span")
+                    if len(spans) >= 2:
+                        return (spans[-1].text or "").strip()
+                    return (combo_el.text or "").strip()
+                except Exception:
+                    return ""
+
+            # Map model -> index theo thứ tự popover
+            order = [
+                "Veo 3 - Fast",
+                "Veo 2 - Fast",
+                "Veo 3 - Quality",
+                "Veo 2 - Quality",
+            ]
+            target_index = None
+            try:
+                target_index = order.index((model_text or "").strip()) + 1
+            except Exception:
+                target_index = None
+
+            attempts = 0
+            while attempts < 3:
+                attempts += 1
+                combo = get_model_combo()
+                if combo is None:
+                    return False
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", combo)
+                except Exception:
+                    pass
+
+                # Mở listbox và lấy đúng listbox theo aria-controls
+                self._human_click_el(driver, combo)
+                aria_controls = combo.get_attribute("aria-controls") or ""
+                listbox = None
+                if aria_controls:
+                    try:
+                        listbox = WebDriverWait(driver, 7).until(EC.presence_of_element_located((By.ID, aria_controls)))
+                    except Exception:
+                        listbox = None
+                if listbox is None:
+                    try:
+                        listbox = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, "//*[@role='listbox']")))
+                    except Exception:
+                        listbox = None
+                if listbox is None:
+                    continue
+
+                picked = False
+                # Ưu tiên chọn bằng bàn phím theo đúng thứ tự index để tránh sai click
+                if target_index is not None:
+                    try:
+                        # HOME về đầu danh sách, sau đó ARROW_DOWN (target_index-1) lần, rồi ENTER
+                        ActionChains(driver).send_keys(Keys.HOME).pause(0.1).perform()
+                        for _ in range(max(0, target_index - 1)):
+                            ActionChains(driver).send_keys(Keys.ARROW_DOWN).pause(0.05).perform()
+                        ActionChains(driver).send_keys(Keys.ENTER).perform()
+                        picked = True
+                    except Exception:
+                        picked = False
+
+                # Nếu bàn phím không thành công, thử click theo text chính xác
+                if not picked:
+                    try:
+                        el = listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{model_text}']]")
+                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                        self._human_click_el(driver, el)
+                        picked = True
+                    except Exception:
+                        # Fallback contains
+                        try:
+                            el = listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{model_text}')]")
+                            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                            self._human_click_el(driver, el)
+                            picked = True
+                        except Exception:
+                            # Fallback cuối: click theo index nếu biết (chuột)
+                            if target_index is not None:
+                                try:
+                                    options = listbox.find_elements(By.XPATH, ".//*[@role='option']")
+                                    if options and len(options) >= target_index:
+                                        el = options[target_index - 1]
+                                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                                        self._human_click_el(driver, el)
+                                        picked = True
+                                except Exception:
+                                    pass
+
+                time.sleep(0.3)
+                # Xác thực kết quả hiển thị trên combobox
+                combo = get_model_combo()
+                if combo is None:
+                    continue
+                shown = read_combo_value(combo)
+                if (model_text or "").strip().lower() == (shown or "").strip().lower():
+                    return True
+                # Nếu chưa đúng, thử đóng listbox (ESC) và lặp lại
+                try:
+                    ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                except Exception:
+                    pass
+                time.sleep(0.2)
+            return False
+        except Exception:
+            return False
+
+    def _select_radix_option_by_text(self, driver: webdriver.Chrome, text: str) -> None:
+        """Chọn option trong popover Radix Select theo nội dung span hiển thị.
+        Hỗ trợ cấu trúc như user cung cấp: role=listbox, items role=option, có span chứa text.
+        """
+        try:
+            # Đợi listbox mở
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[@role='listbox']"))
+                )
+            except Exception:
+                pass
+
+            # Ưu tiên match exact theo span
+            candidates = [
+                f"//*[@role='listbox']//*[@role='option'][.//span[normalize-space(text())='{text}']]",
+                f"//*[@role='listbox']//*[@role='option'][contains(., '{text}')]",
+                f"//*[@role='listbox']//*[contains(@class,'sc-acb5d8f5-2') and @role='option' and .//span[normalize-space(text())='{text}']]",
+            ]
+
+            for xp in candidates:
+                try:
+                    el = driver.find_element(By.XPATH, xp)
+                    self._human_click_el(driver, el)
+                    time.sleep(0.2)
+                    return
+                except Exception:
+                    continue
+
+            # Fallback: scroll viewport và thử lại
+            try:
+                viewport = driver.find_element(By.CSS_SELECTOR, "[data-radix-select-viewport]")
+                # Scroll lên đỉnh và thử
+                driver.execute_script("arguments[0].scrollTop = 0;", viewport)
+                time.sleep(0.1)
+                el = driver.find_element(By.XPATH, f"//*[@role='listbox']//*[@role='option'][.//span[normalize-space(text())='{text}']]")
+                self._human_click_el(driver, el)
+                time.sleep(0.2)
+                return
+            except Exception:
+                pass
+
+            # Fallback cuối: duyệt tất cả role=option và chọn item có aria-selected='true' gần text (nếu text rút gọn)
+            try:
+                options = driver.find_elements(By.XPATH, "//*[@role='listbox']//*[@role='option']")
+                for opt in options:
+                    try:
+                        label_span = opt.find_element(By.XPATH, ".//span")
+                        label = label_span.text.strip()
+                        if label == text or text.lower() in label.lower():
+                            self._human_click_el(driver, opt)
+                            time.sleep(0.2)
+                            return
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     # ===================== Human-like helpers =====================
     def _human_delay(self, min_seconds: float = 1.0, max_seconds: float = 2.5) -> None:

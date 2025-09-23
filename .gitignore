@@ -2,3 +2,11 @@ __pycache__/
 .history/
 chrome_cache/
 downloads/
+dist/
+build/
+*.spec
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz

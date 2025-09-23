@@ -1,1 +1,0 @@
-../../../../Resources/selenium/webdriver/common/virtual_authenticator.py
