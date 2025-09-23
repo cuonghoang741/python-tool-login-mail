@@ -591,6 +591,60 @@ class GmailBrowserLoginTool:
         """
         messagebox.showinfo("Hướng dẫn đăng nhập", instructions)
     
+    def _show_roboneo_login_notification(self, email_addr):
+        """Hiển thị thông báo yêu cầu đăng nhập Roboneo"""
+        notification = f"""
+🔐 YÊU CẦU ĐĂNG NHẬP ROBONEO
+
+Email: {email_addr}
+
+⚠️ Phát hiện nút "Log in" trên trang Roboneo!
+
+Vui lòng thực hiện các bước sau:
+1. Trong trình duyệt đã mở, nhấn nút "Log in"
+2. Đăng nhập bằng tài khoản Google của bạn
+3. Hoàn tất quá trình xác thực nếu có
+4. Đợi chuyển về trang chủ Roboneo
+
+⏰ Thời gian chờ: 5 phút
+🔄 Ứng dụng sẽ tự động phát hiện khi đăng nhập thành công
+        """
+        messagebox.showwarning("Yêu cầu đăng nhập Roboneo", notification)
+    
+    def _check_roboneo_login_required(self, driver, email_addr, show_notification=True):
+        """Kiểm tra xem có cần đăng nhập Roboneo không"""
+        try:
+            # Các selector khác nhau để tìm nút Log in
+            selectors = [
+                "button.Button_button_box__iXdKv.Button_plain__u3ul4.Button_normal__8WqPQ.UserCard_noLoginBox__XWhP8",
+                "button[class*='UserCard_noLoginBox']",
+                "button[class*='noLoginButton']",
+                "div[class*='noLoginButton']",
+                "//button[contains(., 'Log in')]",
+                "//div[contains(., 'Log in')]",
+                "//*[contains(text(), 'Log in')]"
+            ]
+            
+            for selector in selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    if elements:
+                        # Phát hiện nút Log in - hiển thị thông báo nếu được yêu cầu
+                        if show_notification:
+                            self.root.after(0, lambda: self._show_roboneo_login_notification(email_addr))
+                            self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: Phát hiện nút Log in - Yêu cầu đăng nhập cho {email_addr}", foreground="orange"))
+                        return True
+                except Exception:
+                    continue
+            
+            return False
+        except Exception:
+            return False
+    
     # ====== Profiles (per-email cache) ======
     def _load_profiles(self):
         try:
@@ -723,7 +777,13 @@ class GmailBrowserLoginTool:
             wait = WebDriverWait(drv, 30)
             drv.get("https://www.roboneo.com/home")
 
-            # Type prompt
+            # Đợi trang load và kiểm tra nút đăng nhập
+            time.sleep(3)
+            if self._check_roboneo_login_required(drv, email_addr, show_notification=True):
+                return
+
+            # Type prompt và lấy textarea element
+            area = None
             try:
                 area = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[maxlength="1000"]')))
                 area.clear()
@@ -733,17 +793,13 @@ class GmailBrowserLoginTool:
             except Exception:
                 pass
 
-            # Upload file: ảnh hoặc video
-            if file_path:
+            # Upload file: paste trực tiếp vào textarea
+            if file_path and area:
                 try:
-                    # Thử nút Add images
-                    self._try_click_upload(drv, wait, "Add images", file_path)
+                    # Paste file trực tiếp vào textarea thay vì dùng nút upload
+                    self._paste_file_to_textarea(drv, area, file_path)
                 except Exception:
-                    try:
-                        # Thử nút Add video
-                        self._try_click_upload(drv, wait, "Add video", file_path)
-                    except Exception:
-                        pass
+                    pass
 
             # Click gửi (nút send)
             try:
@@ -761,11 +817,18 @@ class GmailBrowserLoginTool:
             drv = self._open_profile_and_get_driver(email_addr, meta)
             wait = WebDriverWait(drv, 30)
             drv.get("https://www.roboneo.com/home")
+            
+            # Đợi trang load và kiểm tra nút đăng nhập
+            time.sleep(3)
+            if self._check_roboneo_login_required(drv, email_addr, show_notification=True):
+                return
+            
             for i, row in enumerate(rows):
                 promt_text = row.get('promt', '')
                 file_path = row.get('file', '')
 
-                # prompt
+                # prompt và lấy textarea element
+                area = None
                 try:
                     area = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'textarea[maxlength="1000"]')))
                     area.clear()
@@ -775,15 +838,13 @@ class GmailBrowserLoginTool:
                 except Exception:
                     pass
 
-                # upload
-                if file_path:
+                # upload - paste trực tiếp vào textarea
+                if file_path and area:
                     try:
-                        self._try_click_upload(drv, wait, "Add images", file_path)
+                        # Paste file trực tiếp vào textarea thay vì dùng nút upload
+                        self._paste_file_to_textarea(drv, area, file_path)
                     except Exception:
-                        try:
-                            self._try_click_upload(drv, wait, "Add video", file_path)
-                        except Exception:
-                            pass
+                        pass
 
                 # send
                 try:
@@ -866,6 +927,578 @@ class GmailBrowserLoginTool:
                     continue
         except Exception:
             pass
+    
+    def _paste_file_to_textarea(self, driver, textarea_element, file_path):
+        """Paste file trực tiếp vào textarea thay vì dùng nút upload"""
+        try:
+            print(f"[PASTE] Attempting to paste file to textarea: {file_path}")
+            
+            # Human-like behavior: scroll to textarea first
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", textarea_element)
+            time.sleep(random.uniform(0.5, 1.0))
+            
+            # Human-like click on textarea để focus
+            self._human_click(textarea_element)
+            time.sleep(random.uniform(0.3, 0.7))
+            
+            # Focus vào textarea
+            driver.execute_script("arguments[0].focus();", textarea_element)
+            time.sleep(random.uniform(0.2, 0.5))
+            
+            # Thử nhiều phương pháp paste - ưu tiên các phương pháp đơn giản trước
+            methods = [
+                # Method 1: Tìm và sử dụng file input có sẵn (đơn giản nhất)
+                lambda: self._paste_via_direct_file_input(driver, file_path),
+                # Method 2: Tạo input file mới và gửi file trực tiếp
+                lambda: self._paste_via_create_file_input(driver, file_path),
+                # Method 3: Trigger file dialog và gửi file
+                lambda: self._paste_via_file_dialog(driver, file_path),
+                # Method 4: Inject file trực tiếp vào DOM
+                lambda: self._paste_via_dom_injection(driver, file_path),
+                # Method 5: Trigger click trên nút upload ẩn
+                lambda: self._paste_via_hidden_upload_click(driver, file_path),
+                # Method 6: Sử dụng file input có sẵn trên trang
+                lambda: self._paste_via_existing_input(driver, textarea_element, file_path),
+                # Method 7: Tạo input file mới và trigger paste event
+                lambda: self._paste_file_via_input_event(driver, textarea_element, file_path),
+                # Method 8: Drag and drop simulation
+                lambda: self._paste_via_dragdrop_simple(driver, textarea_element, file_path),
+                # Method 9: Clipboard API
+                lambda: self._paste_via_clipboard(driver, textarea_element, file_path),
+                # Method 10: Keyboard shortcut Ctrl+V
+                lambda: self._paste_via_keyboard_shortcut(driver, textarea_element, file_path)
+            ]
+            
+            for i, method in enumerate(methods, 1):
+                try:
+                    print(f"[PASTE] Trying method {i}")
+                    if method():
+                        print(f"[PASTE] Success with method {i}")
+                        return True
+                except Exception as e:
+                    print(f"[PASTE] Method {i} failed: {e}")
+                    continue
+            
+            print("[PASTE] All paste methods failed")
+            return False
+            
+        except Exception as e:
+            print(f"[PASTE] Error in paste function: {e}")
+            return False
+    
+    def _paste_via_direct_file_input(self, driver, file_path):
+        """Phương pháp đơn giản nhất - tìm file input có sẵn và gửi file trực tiếp"""
+        try:
+            print("[PASTE-DIRECT] Looking for file inputs on page")
+            
+            # Tìm tất cả file input có sẵn
+            file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+            print(f"[PASTE-DIRECT] Found {len(file_inputs)} file inputs")
+            
+            for i, file_input in enumerate(file_inputs):
+                try:
+                    # Gửi file path trực tiếp vào input
+                    file_input.send_keys(file_path)
+                    time.sleep(1)
+                    print(f"[PASTE-DIRECT] Successfully sent file to input {i+1}")
+                    return True
+                except Exception as e:
+                    print(f"[PASTE-DIRECT] Failed to send to input {i+1}: {e}")
+                    continue
+            
+            print("[PASTE-DIRECT] No file inputs found or all failed")
+            return False
+            
+        except Exception as e:
+            print(f"[PASTE-DIRECT] Error: {e}")
+            return False
+    
+    def _paste_via_create_file_input(self, driver, file_path):
+        """Tạo file input mới và gửi file trực tiếp"""
+        try:
+            print("[PASTE-CREATE] Creating new file input")
+            
+            # Tạo file input mới
+            js_code = """
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.style.display = 'none';
+            fileInput.accept = 'image/*,video/*';
+            fileInput.id = 'temp-file-input';
+            document.body.appendChild(fileInput);
+            return fileInput;
+            """
+            
+            file_input = driver.execute_script(js_code)
+            time.sleep(0.3)
+            
+            # Gửi file path
+            file_input.send_keys(file_path)
+            time.sleep(1)
+            
+            # Trigger change event
+            driver.execute_script("""
+                const input = document.getElementById('temp-file-input');
+                if (input) {
+                    const event = new Event('change', { bubbles: true });
+                    input.dispatchEvent(event);
+                }
+            """)
+            
+            time.sleep(1)
+            
+            # Cleanup
+            driver.execute_script("""
+                const input = document.getElementById('temp-file-input');
+                if (input) input.remove();
+            """)
+            
+            print("[PASTE-CREATE] File input created and file sent successfully")
+            return True
+            
+        except Exception as e:
+            print(f"[PASTE-CREATE] Error: {e}")
+            return False
+    
+    def _paste_via_file_dialog(self, driver, file_path):
+        """Trigger file dialog và gửi file"""
+        try:
+            print("[PASTE-DIALOG] Triggering file dialog")
+            
+            # Tạo file input và trigger click để mở dialog
+            js_code = """
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.style.display = 'none';
+            fileInput.accept = 'image/*,video/*';
+            fileInput.id = 'dialog-file-input';
+            document.body.appendChild(fileInput);
+            
+            // Trigger click để mở file dialog
+            fileInput.click();
+            
+            return fileInput;
+            """
+            
+            file_input = driver.execute_script(js_code)
+            time.sleep(0.5)
+            
+            # Gửi file path
+            file_input.send_keys(file_path)
+            time.sleep(1)
+            
+            # Trigger change event
+            driver.execute_script("""
+                const input = document.getElementById('dialog-file-input');
+                if (input && input.files.length > 0) {
+                    const event = new Event('change', { bubbles: true });
+                    input.dispatchEvent(event);
+                    
+                    // Trigger input event
+                    const inputEvent = new Event('input', { bubbles: true });
+                    input.dispatchEvent(inputEvent);
+                }
+            """)
+            
+            time.sleep(1)
+            
+            # Cleanup
+            driver.execute_script("""
+                const input = document.getElementById('dialog-file-input');
+                if (input) input.remove();
+            """)
+            
+            print("[PASTE-DIALOG] File dialog triggered and file sent successfully")
+            return True
+            
+        except Exception as e:
+            print(f"[PASTE-DIALOG] Error: {e}")
+            return False
+    
+    def _paste_via_dom_injection(self, driver, file_path):
+        """Inject file trực tiếp vào DOM và trigger events"""
+        try:
+            print("[PASTE-DOM] Injecting file into DOM")
+            
+            # Đọc file và convert thành base64
+            import base64
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+                file_base64 = base64.b64encode(file_data).decode('utf-8')
+            
+            # Inject file vào DOM và trigger events
+            js_code = f"""
+            const fileData = '{file_base64}';
+            const fileName = '{os.path.basename(file_path)}';
+            const fileType = 'image/jpeg'; // Default type
+            
+            // Tạo File object từ base64
+            const byteCharacters = atob(fileData);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {{
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }}
+            const byteArray = new Uint8Array(byteNumbers);
+            const file = new File([byteArray], fileName, {{ type: fileType }});
+            
+            // Tạo DataTransfer object
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            
+            // Tìm tất cả file inputs trên trang
+            const fileInputs = document.querySelectorAll('input[type="file"]');
+            
+            if (fileInputs.length > 0) {{
+                // Gửi file vào input đầu tiên
+                const input = fileInputs[0];
+                input.files = dataTransfer.files;
+                
+                // Trigger change event
+                const changeEvent = new Event('change', {{ bubbles: true }});
+                input.dispatchEvent(changeEvent);
+                
+                // Trigger input event
+                const inputEvent = new Event('input', {{ bubbles: true }});
+                input.dispatchEvent(inputEvent);
+                
+                console.log('File injected into existing input');
+                return true;
+            }} else {{
+                // Tạo input mới nếu không có
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.style.display = 'none';
+                fileInput.files = dataTransfer.files;
+                fileInput.id = 'injected-file-input';
+                document.body.appendChild(fileInput);
+                
+                // Trigger change event
+                const changeEvent = new Event('change', {{ bubbles: true }});
+                fileInput.dispatchEvent(changeEvent);
+                
+                console.log('File injected into new input');
+                return true;
+            }}
+            """
+            
+            result = driver.execute_script(js_code)
+            time.sleep(1)
+            
+            # Cleanup
+            driver.execute_script("""
+                const input = document.getElementById('injected-file-input');
+                if (input) input.remove();
+            """)
+            
+            print("[PASTE-DOM] File injected into DOM successfully")
+            return result
+            
+        except Exception as e:
+            print(f"[PASTE-DOM] Error: {e}")
+            return False
+    
+    def _paste_via_hidden_upload_click(self, driver, file_path):
+        """Trigger click trên nút upload ẩn và gửi file"""
+        try:
+            print("[PASTE-HIDDEN] Looking for hidden upload buttons")
+            
+            # Tìm các nút upload có thể ẩn
+            upload_selectors = [
+                "input[type='file']",
+                "button[class*='upload']",
+                "div[class*='upload']",
+                "span[class*='upload']",
+                "//button[contains(text(), 'Add images')]",
+                "//button[contains(text(), 'Add video')]",
+                "//div[contains(text(), 'Add images')]",
+                "//div[contains(text(), 'Add video')]",
+                "//*[contains(@class, 'upload')]",
+                "//*[contains(@class, 'Upload')]"
+            ]
+            
+            for selector in upload_selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for element in elements:
+                        try:
+                            # Click element
+                            driver.execute_script("arguments[0].click();", element)
+                            time.sleep(0.5)
+                            
+                            # Tìm file input sau khi click
+                            file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                            if file_inputs:
+                                file_inputs[0].send_keys(file_path)
+                                time.sleep(1)
+                                print(f"[PASTE-HIDDEN] Successfully uploaded via hidden button: {selector}")
+                                return True
+                                
+                        except Exception:
+                            continue
+                            
+                except Exception:
+                    continue
+            
+            print("[PASTE-HIDDEN] No hidden upload buttons found")
+            return False
+            
+        except Exception as e:
+            print(f"[PASTE-HIDDEN] Error: {e}")
+            return False
+    
+    def _paste_via_existing_input(self, driver, textarea_element, file_path):
+        """Sử dụng file input có sẵn trên trang để paste file"""
+        try:
+            print("[PASTE-EXISTING] Looking for existing file inputs on page")
+            
+            # Tìm tất cả input file có sẵn
+            file_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+            
+            if file_inputs:
+                print(f"[PASTE-EXISTING] Found {len(file_inputs)} existing file inputs")
+                
+                for i, file_input in enumerate(file_inputs):
+                    try:
+                        # Make input visible temporarily
+                        driver.execute_script("arguments[0].style.display='block'; arguments[0].style.visibility='visible';", file_input)
+                        time.sleep(0.2)
+                        
+                        # Send file path
+                        file_input.send_keys(file_path)
+                        time.sleep(0.5)
+                        
+                        # Trigger change event
+                        driver.execute_script("""
+                            const input = arguments[0];
+                            const event = new Event('change', { bubbles: true });
+                            input.dispatchEvent(event);
+                        """, file_input)
+                        
+                        time.sleep(1)
+                        
+                        # Hide input again
+                        driver.execute_script("arguments[0].style.display='none'; arguments[0].style.visibility='hidden';", file_input)
+                        
+                        print(f"[PASTE-EXISTING] Successfully sent file to existing input {i+1}")
+                        return True
+                        
+                    except Exception as e:
+                        print(f"[PASTE-EXISTING] Failed to send to input {i+1}: {e}")
+                        continue
+            
+            print("[PASTE-EXISTING] No existing file inputs found")
+            return False
+            
+        except Exception as e:
+            print(f"[PASTE-EXISTING] Error: {e}")
+            return False
+    
+    def _paste_file_via_input_event(self, driver, textarea_element, file_path):
+        """Paste file vào textarea bằng cách tạo input file và trigger event"""
+        try:
+            print("[PASTE-INPUT-EVENT] Creating file input and triggering paste event")
+            
+            # Tạo input file ẩn
+            js_code = """
+            const textarea = arguments[0];
+            
+            // Tạo input file ẩn
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.style.display = 'none';
+            fileInput.accept = 'image/*,video/*';
+            fileInput.id = 'paste-file-input';
+            fileInput.multiple = false;
+            document.body.appendChild(fileInput);
+            
+            return fileInput;
+            """
+            
+            file_input = driver.execute_script(js_code, textarea_element)
+            time.sleep(0.3)
+            
+            # Gửi file path vào input
+            file_input.send_keys(file_path)
+            time.sleep(0.5)
+            
+            # Trigger paste event trên textarea với file data
+            driver.execute_script("""
+                const textarea = arguments[0];
+                const fileInput = arguments[1];
+                
+                // Lấy file từ input
+                const file = fileInput.files[0];
+                if (!file) {
+                    console.log('No file found in input');
+                    return false;
+                }
+                
+                console.log('File found:', file.name, file.type, file.size);
+                
+                // Tạo DataTransfer object
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                
+                // Tạo paste event
+                const pasteEvent = new ClipboardEvent('paste', {
+                    bubbles: true,
+                    cancelable: true,
+                    clipboardData: dataTransfer
+                });
+                
+                // Trigger paste event trên textarea
+                textarea.dispatchEvent(pasteEvent);
+                
+                // Cũng thử trigger drop event
+                const dropEvent = new DragEvent('drop', {
+                    bubbles: true,
+                    cancelable: true,
+                    dataTransfer: dataTransfer
+                });
+                
+                textarea.dispatchEvent(dropEvent);
+                
+                // Cleanup
+                fileInput.remove();
+                
+                return true;
+            """, textarea_element, file_input)
+            
+            time.sleep(1)
+            print("[PASTE-INPUT-EVENT] Paste event triggered successfully")
+            return True
+            
+        except Exception as e:
+            print(f"[PASTE-INPUT-EVENT] Error: {e}")
+            return False
+    
+    def _paste_via_dragdrop_simple(self, driver, textarea_element, file_path):
+        """Drag and drop đơn giản"""
+        try:
+            print("[PASTE-DRAGDROP] Trying simple drag and drop")
+            
+            # Tạo input file ẩn
+            js_code = """
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.style.display = 'none';
+            fileInput.accept = 'image/*,video/*';
+            fileInput.id = 'dragdrop-file-input';
+            document.body.appendChild(fileInput);
+            return fileInput;
+            """
+            
+            file_input = driver.execute_script(js_code)
+            time.sleep(0.3)
+            
+            # Send file to input
+            file_input.send_keys(file_path)
+            time.sleep(0.5)
+            
+            # Simulate drag and drop
+            from selenium.webdriver.common.action_chains import ActionChains
+            
+            actions = ActionChains(driver)
+            actions.drag_and_drop(file_input, textarea_element).perform()
+            time.sleep(1)
+            
+            # Cleanup
+            driver.execute_script("document.getElementById('dragdrop-file-input').remove();")
+            
+            print("[PASTE-DRAGDROP] Simple drag and drop completed")
+            return True
+            
+        except Exception as e:
+            print(f"[PASTE-DRAGDROP] Error: {e}")
+            return False
+    
+    def _paste_via_clipboard(self, driver, textarea_element, file_path):
+        """Thử paste qua clipboard API"""
+        try:
+            # Đọc file và convert thành base64
+            import base64
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+                file_base64 = base64.b64encode(file_data).decode('utf-8')
+            
+            # Inject clipboard data
+            js_code = f"""
+            const textarea = arguments[0];
+            const fileData = '{file_base64}';
+            const fileName = '{os.path.basename(file_path)}';
+            
+            // Tạo File object
+            const byteCharacters = atob(fileData);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {{
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }}
+            const byteArray = new Uint8Array(byteNumbers);
+            const file = new File([byteArray], fileName, {{ type: 'image/jpeg' }});
+            
+            // Trigger paste event
+            const pasteEvent = new ClipboardEvent('paste', {{
+                clipboardData: new DataTransfer()
+            }});
+            pasteEvent.clipboardData.items.add(file);
+            textarea.dispatchEvent(pasteEvent);
+            
+            return true;
+            """
+            
+            result = driver.execute_script(js_code, textarea_element)
+            time.sleep(1)
+            return result
+            
+        except Exception as e:
+            print(f"[PASTE-CLIPBOARD] Error: {e}")
+            return False
+    
+    def _paste_via_keyboard_shortcut(self, driver, textarea_element, file_path):
+        """Simulate paste với keyboard shortcut Ctrl+V giống người dùng thật"""
+        try:
+            print("[PASTE-KEYBOARD] Trying keyboard shortcut paste")
+            
+            # Copy file to system clipboard first
+            import subprocess
+            import platform
+            
+            # Copy file to clipboard using system command
+            if platform.system() == "Darwin":  # macOS
+                subprocess.run(['osascript', '-e', f'set the clipboard to (read (POSIX file "{file_path}") as «class PNGf»)'], 
+                             check=False, capture_output=True)
+            elif platform.system() == "Windows":
+                # Windows clipboard copy
+                subprocess.run(['powershell', '-command', f'Set-Clipboard -Path "{file_path}"'], 
+                             check=False, capture_output=True)
+            else:  # Linux
+                subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', file_path], 
+                             check=False, capture_output=True)
+            
+            time.sleep(0.5)
+            
+            # Focus textarea
+            driver.execute_script("arguments[0].focus();", textarea_element)
+            time.sleep(0.2)
+            
+            # Simulate Ctrl+V
+            from selenium.webdriver.common.keys import Keys
+            from selenium.webdriver.common.action_chains import ActionChains
+            
+            actions = ActionChains(driver)
+            actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+            time.sleep(1)
+            
+            print("[PASTE-KEYBOARD] Keyboard shortcut paste completed")
+            return True
+            
+        except Exception as e:
+            print(f"[PASTE-KEYBOARD] Error: {e}")
+            return False
     
     def _remember_profile(self, email_addr, cache_dir, user_agent):
         if not email_addr:
@@ -976,15 +1609,18 @@ class GmailBrowserLoginTool:
             wait = WebDriverWait(drv, 20)
             drv.get("https://www.roboneo.com/home")
 
-            # Kiểm tra nút Login theo class như đã cung cấp
+            # Đợi trang load
+            time.sleep(3)
+
+            # Kiểm tra lần đầu và hiển thị thông báo nếu cần đăng nhập
+            if self._check_roboneo_login_required(drv, email_addr):
+                # Đã hiển thị thông báo trong hàm helper, tiếp tục đợi đăng nhập
+                pass
+
+            # Kiểm tra đăng nhập thành công
             def is_logged_in():
                 try:
-                    # Nếu không còn nút Log in thì coi như đã đăng nhập
-                    buttons = drv.find_elements(By.CSS_SELECTOR, 
-                        "button.Button_button_box__iXdKv.Button_plain__u3ul4.Button_normal__8WqPQ.UserCard_noLoginBox__XWhP8")
-                    if len(buttons) == 0:
-                        return True
-                    return False
+                    return not self._check_roboneo_login_required(drv, email_addr, show_notification=False)
                 except Exception:
                     return False
 
@@ -992,7 +1628,7 @@ class GmailBrowserLoginTool:
             start = time.time()
             while time.time() - start < 300:
                 if is_logged_in():
-                    self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: đã đăng nhập", foreground="green"))
+                    self.root.after(0, lambda: self.status_label.config(text=f"Roboneo: đã đăng nhập thành công", foreground="green"))
                     return
                 time.sleep(5)
 
