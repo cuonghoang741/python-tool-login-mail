@@ -573,6 +573,13 @@ class FlowBrowserTool:
             self.login_success = True
             self._set_status("Đăng nhập thành công Google Flow", "green")
             messagebox.showinfo("Thành công", "Đăng nhập Google Flow thành công!")
+            # Đóng trình duyệt sau khi đăng nhập thành công
+            try:
+                if self.driver is not None:
+                    self.driver.quit()
+            except Exception:
+                pass
+            self.driver = None
         except Exception as ex:
             self.login_success = False
             self._set_status("Đăng nhập thất bại", "red")
@@ -604,6 +611,13 @@ class FlowBrowserTool:
             self.login_success = True
             self._set_status("Đăng nhập thành công Google Flow", "green")
             messagebox.showinfo("Thành công", "Đăng nhập Google Flow thành công!")
+            # Đóng trình duyệt sau khi đăng nhập thành công
+            try:
+                if self.driver is not None:
+                    self.driver.quit()
+            except Exception:
+                pass
+            self.driver = None
         except Exception as ex:
             self.login_success = False
             self._set_status("Đăng nhập thất bại", "red")
@@ -2380,6 +2394,32 @@ class FlowBrowserTool:
 def main() -> None:
     root = tk.Tk()
     app = FlowBrowserTool(root)
+    # Đảm bảo đóng toàn bộ browser khi thoát ứng dụng
+    def _on_app_close():
+        try:
+            # Đóng driver login
+            try:
+                if getattr(app, 'driver', None) is not None:
+                    app.driver.quit()
+            except Exception:
+                pass
+            # Đóng driver execute
+            try:
+                if getattr(app, 'exec_driver', None) is not None:
+                    app.exec_driver.quit()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    try:
+        root.protocol("WM_DELETE_WINDOW", _on_app_close)
+    except Exception:
+        pass
     root.mainloop()
 
 
