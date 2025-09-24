@@ -524,11 +524,8 @@ class FlowBrowserTool:
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_experimental_option("detach", True)
         
-        # Headless mode nếu được chọn
-        if self.headless_mode.get():
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
+        # Luôn chạy ở chế độ hiển thị (headless = False)
+        # Bỏ qua mọi cấu hình headless trước đây
 
         # Bật performance logging để đọc Network logs
         try:
@@ -1099,11 +1096,14 @@ class FlowBrowserTool:
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--lang=vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
         
-        # Headless mode nếu được chọn
-        if self.headless_mode.get():
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
+        # Cho phép tùy biến headless cho luồng execute theo self.headless_mode
+        try:
+            if self.headless_mode.get():
+                chrome_options.add_argument("--headless")
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+        except Exception:
+            pass
             
         # Bật performance logging để đọc Network logs
         try:
