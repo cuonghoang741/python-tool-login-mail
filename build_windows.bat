@@ -10,18 +10,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Activate virtual environment
+REM (Optional) Activate virtual environment
 echo Activating virtual environment...
 call venv\Scripts\activate.bat
-if errorlevel 1 (
-    echo Error: Failed to activate virtual environment
-    pause
-    exit /b 1
-)
 
 REM Upgrade pip
 echo Upgrading pip...
-python -m pip install --upgrade pip
+venv\Scripts\python.exe -m ensurepip --upgrade
+if errorlevel 1 (
+    echo Error: Failed to run ensurepip
+    pause
+    exit /b 1
+)
+venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
 if errorlevel 1 (
     echo Error: Failed to upgrade pip
     pause
@@ -30,7 +31,7 @@ if errorlevel 1 (
 
 REM Install requirements
 echo Installing requirements...
-pip install -r requirements.txt
+venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 (
     echo Error: Failed to install requirements
     pause
@@ -39,7 +40,7 @@ if errorlevel 1 (
 
 REM Install PyInstaller
 echo Installing PyInstaller...
-pip install pyinstaller
+venv\Scripts\python.exe -m pip install pyinstaller
 if errorlevel 1 (
     echo Error: Failed to install PyInstaller
     pause
@@ -53,7 +54,7 @@ if exist build rmdir /s /q build
 
 REM Build executable
 echo Building executable...
-pyinstaller --clean --noconfirm GoogleFlowTool.spec
+venv\Scripts\python.exe -m PyInstaller --clean --noconfirm GoogleFlowTool.spec
 if errorlevel 1 (
     echo Error: Build failed
     pause
