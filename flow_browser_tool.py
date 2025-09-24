@@ -569,6 +569,12 @@ class FlowBrowserTool:
             if not ok:
                 raise Exception("Hết thời gian chờ vào Google Flow")
 
+            # If Flow presents a final "Sign in with Google" gate, click it
+            try:
+                self._click_flow_google_signin(self.driver)
+            except Exception:
+                pass
+
             self._remember_profile(email_addr, self.current_cache_dir, self.current_user_agent)
             self.login_success = True
             self._set_status("Đăng nhập thành công Google Flow", "green")
@@ -606,6 +612,12 @@ class FlowBrowserTool:
             # After Google is signed in, open Flow
             self.driver.get("https://labs.google/fx/tools/flow")
             self._wait_until(lambda: "labs.google" in self.driver.current_url, timeout=120)
+
+            # If Flow presents a final "Sign in with Google" gate, click it
+            try:
+                self._click_flow_google_signin(self.driver)
+            except Exception:
+                pass
 
             self._remember_profile(email_addr, self.current_cache_dir, self.current_user_agent)
             self.login_success = True
@@ -989,6 +1001,33 @@ class FlowBrowserTool:
             "//a[contains(., 'Sign in')]",
             "//*[contains(text(), 'Sign in')]",
         ])
+
+    def _click_flow_google_signin(self, driver: webdriver.Chrome) -> None:
+        """Nhấn nút "Sign in with Google" trên trang Flow nếu có.
+        Hỗ trợ cả tiếng Việt nếu UI được bản địa hóa.
+        """
+        candidates = [
+            "//button[.//span[normalize-space()='Sign in with Google']]",
+            "//button[contains(., 'Sign in with Google')]",
+            "//button[contains(@class,'sc-') and contains(., 'Sign in with Google')]",
+            "//button[.//span[normalize-space()='Đăng nhập bằng Google']]",
+            "//button[contains(., 'Đăng nhập bằng Google')]",
+        ]
+        # Đợi trang ổn định một chút
+        self._human_delay(0.5, 1.5)
+        for xp in candidates:
+            try:
+                el = driver.find_element(By.XPATH, xp)
+                # Đảm bảo phần tử có thể click
+                try:
+                    WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, xp)))
+                except Exception:
+                    pass
+                self._human_click_el(driver, el)
+                time.sleep(0.5)
+                return
+            except Exception:
+                continue
 
     def _handle_google_login(self, driver: webdriver.Chrome, email_addr: str) -> None:
         try:
