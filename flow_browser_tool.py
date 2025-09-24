@@ -753,6 +753,21 @@ class FlowBrowserTool:
             except Exception as ex:
                 self._log_exec(f"Failed to apply settings: {ex}", error=True)
 
+            # Với workflow text_to_video: cần nhấn nút 'Tạo' (Create) để execute
+            if wf == "text_to_video":
+                try:
+                    self._log_exec("Clicking 'Tạo' (Create) button for text_to_video...")
+                    self._click_create_button(drv)
+                    self._log_exec("Clicked 'Tạo' successfully.")
+                    # Chờ một chút trước khi monitor
+                    self._log_exec("Waiting 5s before monitoring processing...")
+                    time.sleep(5)
+                    self._log_exec("Monitoring processing and then reading API logs...")
+                    self._monitor_and_fetch_api(drv, wf="text_to_video")
+                    return
+                except Exception as ex:
+                    self._log_exec(f"Failed to click Create button for text_to_video: {ex}", error=True)
+
             # Apply config if UI exposes inputs (best-effort)
             # (Removed) basic config for resolution/duration/fps per user request
 
@@ -781,7 +796,7 @@ class FlowBrowserTool:
                     self._log_exec("Waiting 10s before monitoring processing...")
                     time.sleep(10)
                     self._log_exec("Monitoring processing and then reading API logs...")
-                    self._monitor_and_fetch_api(drv)
+                    self._monitor_and_fetch_api(drv, wf="frames_to_video")
                     # ĐÃ HOÀN TẤT Frames to Video: return ngay để không chạy các bước Submit/Monitor chung bên dưới
                     return
                 except Exception:
@@ -802,7 +817,7 @@ class FlowBrowserTool:
             try:
                 # small delay to allow rendering to start
                 time.sleep(5)
-                self._monitor_and_fetch_api(drv)
+                self._monitor_and_fetch_api(drv, wf=wf)
             except Exception as ex:
                 self._log_exec(f"Monitor error: {ex}", error=True)
         except Exception as ex:
@@ -1421,7 +1436,7 @@ class FlowBrowserTool:
             except Exception as ex:
                 raise Exception(f"Failed to click Create button: {ex}")
 
-    def _monitor_and_fetch_api(self, driver: webdriver.Chrome) -> None:
+    def _monitor_and_fetch_api(self, driver: webdriver.Chrome, wf: str = None) -> None:
         """Theo dõi xử lý đến khi đủ video hoàn tất theo cấu hình Outputs per prompt,
         sau đó reload trang (nếu cần) và đọc API project.searchProjectWorkflows để lấy fifeUri."""
         # Số video kỳ vọng theo cấu hình Outputs per prompt (mặc định 1)
@@ -1439,11 +1454,19 @@ class FlowBrowserTool:
                 running = driver.find_elements(By.XPATH, "//*[contains(translate(normalize-space(text()), 'RUNNING', 'running'), 'running') or contains(@class,'running')]")
             except Exception:
                 running = []
+            # Tiến trình phần trăm: ưu tiên cấu trúc text_to_video nếu xác định, fallback '%' chung
+            percents = []
             try:
-                # Bất kỳ text có dấu % (tiến trình)
-                percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
+                if wf == "text_to_video":
+                    # Phần trăm nằm trong khối progress của card: sc-dd6abb21-1
+                    percents = driver.find_elements(By.XPATH, "//*[contains(@class,'sc-dd6abb21-1')]")
             except Exception:
                 percents = []
+            if not percents:
+                try:
+                    percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
+                except Exception:
+                    percents = []
             return (len(running) > 0) or (len(percents) > 0)
 
         def list_videos():
@@ -1465,8 +1488,9 @@ class FlowBrowserTool:
                     except Exception:
                         # If we can't determine if it's a real video, include it but log
                         result_videos.append(video)
-                
-                self._log_exec(f"Found {len(result_videos)} result videos out of {len(all_videos)} total video elements")
+                # Only log detailed video count for non text_to_video to avoid confusion when only cards exist
+                if wf != "text_to_video":
+                    self._log_exec(f"Found {len(result_videos)} result videos out of {len(all_videos)} total video elements")
                 return result_videos
             except Exception:
                 return []
@@ -1491,8 +1515,80 @@ class FlowBrowserTool:
 
         # Bỏ phát hiện lỗi theo text; chỉ dựa vào timeout và API
 
+        # Specialized card handling for text_to_video
+        def list_t2v_cards():
+            try:
+                # Card container per provided HTML: sc-510f5a89-0 ...
+                cards = driver.find_elements(By.XPATH, "//*[contains(@class,'sc-510f5a89-0')]")
+                return cards
+            except Exception:
+                return []
+
+        def t2v_card_has_progress(card_el):
+            try:
+                # Progress percent inside card: sc-dd6abb21-1 or any % text within the card
+                prog = card_el.find_elements(By.XPATH, ".//*[contains(@class,'sc-dd6abb21-1') or contains(text(), '%')]")
+                return len(prog) > 0
+            except Exception:
+                return False
+
+        def is_t2v_card_ready(card_el):
+            try:
+                if t2v_card_has_progress(card_el):
+                    return False
+                # Ready if action buttons present or media loaded
+                actions = card_el.find_elements(By.XPATH,
+                    ".//button[.//i[normalize-space(text())='download'] or .//span[contains(., 'Tải xuống')] or .//i[normalize-space(text())='fullscreen'] or .//i[normalize-space(text())='more_vert'] or .//span[contains(., 'Thêm vào cảnh')]]"
+                )
+                if actions:
+                    return True
+                # Or a playable video inside
+                vids = card_el.find_elements(By.TAG_NAME, 'video')
+                for v in vids:
+                    try:
+                        duration = v.get_attribute('duration')
+                        if duration and float(duration) > 0:
+                            return True
+                    except Exception:
+                        continue
+                # Or an image fully loaded
+                imgs = card_el.find_elements(By.TAG_NAME, 'img')
+                for im in imgs:
+                    try:
+                        loaded = driver.execute_script("return arguments[0].complete && arguments[0].naturalWidth > 0;", im)
+                        if loaded:
+                            return True
+                    except Exception:
+                        continue
+                return False
+            except Exception:
+                return False
+
         def all_videos_ready():
             try:
+                # For text_to_video, base readiness on cards rather than <video> elements
+                if wf == "text_to_video":
+                    cards = list_t2v_cards()
+                    self._log_exec(f"Checking card readiness (text_to_video): found {len(cards)} cards, expected {expected_videos}")
+                    if len(cards) < expected_videos:
+                        self._log_exec(f"Not enough cards yet: {len(cards)} < {expected_videos}")
+                        return False
+                    if is_any_running_or_progress():
+                        self._log_exec("Still processing - progress indicators present in cards")
+                        return False
+                    ready = 0
+                    for i, c in enumerate(cards[:expected_videos]):
+                        if is_t2v_card_ready(c):
+                            ready += 1
+                            self._log_exec(f"Card {i+1} is ready")
+                        else:
+                            self._log_exec(f"Card {i+1} is not ready yet")
+                    if ready < expected_videos:
+                        self._log_exec(f"Not all cards ready: {ready} < {expected_videos}")
+                        return False
+                    self._log_exec(f"All {expected_videos} card(s) are ready!")
+                    return True
+
                 vids = list_videos()
                 self._log_exec(f"Checking video readiness: found {len(vids)} videos, expected {expected_videos}")
                 
@@ -1509,6 +1605,7 @@ class FlowBrowserTool:
                 # Each card must have action buttons (ready)
                 ready = 0
                 for i, v in enumerate(vids):
+                    # Với text_to_video, card container có class sc-510f5a89-0 ...; nếu cần, xác nhận thêm
                     if is_card_ready_from_video(v):
                         ready += 1
                         self._log_exec(f"Video {i+1} is ready")
@@ -1533,39 +1630,71 @@ class FlowBrowserTool:
                 self._log_exec("Stopped by user during monitoring")
                 return
             try:
-                vids = list_videos()
-                total = len(vids)
-                ready_cnt = 0
-                for v in vids:
-                    if is_card_ready_from_video(v):
-                        ready_cnt += 1
-                
-                # Calculate processing count more accurately
-                if total >= expected_videos:
-                    # If we have enough videos, only count the first N as processing
-                    processing = max(0, expected_videos - ready_cnt)
-                else:
-                    # If we don't have enough videos yet, count all as processing
-                    processing = max(0, total - ready_cnt)
-                # Tổng thời gian đã đếm (mm:ss)
-                try:
+                if wf == "text_to_video":
+                    cards = list_t2v_cards()
+                    total = len(cards)
+                    ready_cnt = 0
+                    processing_cards = 0
+                    for c in cards:
+                        if is_t2v_card_ready(c):
+                            ready_cnt += 1
+                        elif t2v_card_has_progress(c):
+                            processing_cards += 1
+                    # For logging, reflect card-based processing
+                    processing = max(0, min(expected_videos, total) - ready_cnt)
                     elapsed = int(time.time() - start)
                     elapsed_str = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
-                except Exception:
-                    elapsed_str = "00:00"
-                self._log_exec(f"Processing status: remaining {processing}/{total} | elapsed {elapsed_str}")
-                # Nếu không còn processing, tăng đếm ổn định
-                if processing == 0 and total >= expected_videos:
-                    stable_zero_checks += 1
-                    self._log_exec(f"Stable zero checks: {stable_zero_checks}/2")
+                    self._log_exec(f"Processing status (cards): remaining {processing}/{total} | elapsed {elapsed_str}")
+                    # Stable zero tracking
+                    if processing == 0 and total >= expected_videos:
+                        stable_zero_checks += 1
+                        self._log_exec(f"Stable zero checks: {stable_zero_checks}/2")
+                    else:
+                        stable_zero_checks = 0
+                    # Log a sample percent if exists
+                    try:
+                        if cards:
+                            last_card = cards[-1]
+                            # Prioritize percent inside the last card
+                            perc_nodes = last_card.find_elements(By.XPATH, ".//*[contains(@class,'sc-dd6abb21-1') or contains(text(), '%')]")
+                            if perc_nodes:
+                                txt = perc_nodes[0].text.strip()
+                                if txt.endswith('%') or '%' in txt:
+                                    self._log_exec(f"Progress (last card): {txt}")
+                    except Exception:
+                        pass
                 else:
-                    stable_zero_checks = 0
-                # Log phần trăm nếu có
-                percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
-                if percents:
-                    txt = percents[0].text.strip()
-                    if txt.endswith('%'):
-                        self._log_exec(f"Progress hint: {txt}")
+                    vids = list_videos()
+                    total = len(vids)
+                    ready_cnt = 0
+                    for v in vids:
+                        if is_card_ready_from_video(v):
+                            ready_cnt += 1
+                
+                # Calculate processing count more accurately
+                if wf != "text_to_video":
+                    if total >= expected_videos:
+                        processing = max(0, expected_videos - ready_cnt)
+                    else:
+                        processing = max(0, total - ready_cnt)
+                # Tổng thời gian đã đếm (mm:ss)
+                if wf != "text_to_video":
+                    try:
+                        elapsed = int(time.time() - start)
+                        elapsed_str = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
+                    except Exception:
+                        elapsed_str = "00:00"
+                    self._log_exec(f"Processing status: remaining {processing}/{total} | elapsed {elapsed_str}")
+                    if processing == 0 and total >= expected_videos:
+                        stable_zero_checks += 1
+                        self._log_exec(f"Stable zero checks: {stable_zero_checks}/2")
+                    else:
+                        stable_zero_checks = 0
+                    percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
+                    if percents:
+                        txt = percents[0].text.strip()
+                        if txt.endswith('%'):
+                            self._log_exec(f"Progress hint: {txt}")
             except Exception:
                 pass
 
