@@ -673,6 +673,8 @@ class FlowBrowserTool:
             drv = self._open_profile_driver(meta)
             self.exec_driver = drv
             self.stop_exec = False
+            # Store current prompt for folder naming
+            self.current_prompt = prompt
             # set current job and refresh view
             try:
                 self.exec_current_job = {"email": email_addr, "wf": wf, "prompt": prompt, "media": media}
@@ -1445,8 +1447,27 @@ class FlowBrowserTool:
             return (len(running) > 0) or (len(percents) > 0)
 
         def list_videos():
+            """Get actual result videos, not placeholders or loading videos."""
             try:
-                return driver.find_elements(By.TAG_NAME, 'video')
+                # Get all video elements
+                all_videos = driver.find_elements(By.TAG_NAME, 'video')
+                result_videos = []
+                
+                for video in all_videos:
+                    try:
+                        # Check if this video is a real result (has duration > 0 and is not a placeholder)
+                        duration = video.get_attribute('duration')
+                        if duration and float(duration) > 0:
+                            # Additional check: video should be in a result card
+                            parent_card = video.find_element(By.XPATH, "./ancestor::*[contains(@class, 'card') or contains(@class, 'result') or contains(@class, 'video')]")
+                            if parent_card:
+                                result_videos.append(video)
+                    except Exception:
+                        # If we can't determine if it's a real video, include it but log
+                        result_videos.append(video)
+                
+                self._log_exec(f"Found {len(result_videos)} result videos out of {len(all_videos)} total video elements")
+                return result_videos
             except Exception:
                 return []
 
@@ -1473,20 +1494,35 @@ class FlowBrowserTool:
         def all_videos_ready():
             try:
                 vids = list_videos()
+                self._log_exec(f"Checking video readiness: found {len(vids)} videos, expected {expected_videos}")
+                
+                # If we have fewer videos than expected, not ready yet
                 if len(vids) < expected_videos:
+                    self._log_exec(f"Not enough videos yet: {len(vids)} < {expected_videos}")
                     return False
-                # Khi đủ số lượng video, đảm bảo không còn trạng thái running/progress
+                
+                # When we have enough videos, ensure no running/progress states
                 if is_any_running_or_progress():
+                    self._log_exec("Still processing - found running/progress indicators")
                     return False
-                # Từng card phải có nút hành động (đã ready)
+                
+                # Each card must have action buttons (ready)
                 ready = 0
-                for v in vids:
+                for i, v in enumerate(vids):
                     if is_card_ready_from_video(v):
                         ready += 1
+                        self._log_exec(f"Video {i+1} is ready")
+                    else:
+                        self._log_exec(f"Video {i+1} is not ready yet")
+                
                 if ready < expected_videos:
+                    self._log_exec(f"Not all videos ready: {ready} < {expected_videos}")
                     return False
+                
+                self._log_exec(f"All {expected_videos} videos are ready!")
                 return True
-            except Exception:
+            except Exception as e:
+                self._log_exec(f"Error checking video readiness: {e}")
                 return False
 
         # Poll tối đa 4 phút (240s) cho giai đoạn xử lý
@@ -1498,12 +1534,19 @@ class FlowBrowserTool:
                 return
             try:
                 vids = list_videos()
-                total = max(len(vids), expected_videos)
+                total = len(vids)
                 ready_cnt = 0
                 for v in vids:
                     if is_card_ready_from_video(v):
                         ready_cnt += 1
-                processing = max(0, total - ready_cnt)
+                
+                # Calculate processing count more accurately
+                if total >= expected_videos:
+                    # If we have enough videos, only count the first N as processing
+                    processing = max(0, expected_videos - ready_cnt)
+                else:
+                    # If we don't have enough videos yet, count all as processing
+                    processing = max(0, total - ready_cnt)
                 # Tổng thời gian đã đếm (mm:ss)
                 try:
                     elapsed = int(time.time() - start)
@@ -1514,6 +1557,7 @@ class FlowBrowserTool:
                 # Nếu không còn processing, tăng đếm ổn định
                 if processing == 0 and total >= expected_videos:
                     stable_zero_checks += 1
+                    self._log_exec(f"Stable zero checks: {stable_zero_checks}/2")
                 else:
                     stable_zero_checks = 0
                 # Log phần trăm nếu có
@@ -1532,6 +1576,8 @@ class FlowBrowserTool:
 
         # Kiểm tra lần cuối
         videos = list_videos()
+        self._log_exec(f"Final check: found {len(videos)} videos, expected {expected_videos}")
+        
         if len(videos) < expected_videos or is_any_running_or_progress():
             # Fallback heuristic: nếu thấy card kết quả đã hiện model + prompt (đã hoàn tất), vẫn tiếp tục
             try:
@@ -1539,9 +1585,11 @@ class FlowBrowserTool:
                 if summary_cards:
                     self._log_exec("Detected summary cards; proceeding to read API")
                 else:
-                    self._log_exec("Not all videos are ready yet; proceeding best-effort with available results")
+                    self._log_exec(f"Not all videos are ready yet ({len(videos)} < {expected_videos}); proceeding best-effort with available results")
             except Exception:
-                self._log_exec("Not all videos are ready yet; proceeding best-effort with available results")
+                self._log_exec(f"Not all videos are ready yet ({len(videos)} < {expected_videos}); proceeding best-effort with available results")
+        else:
+            self._log_exec(f"All {expected_videos} videos are ready, proceeding to read API")
 
         # Reload trước khi đọc API để đồng bộ trạng thái
         try:
@@ -1590,7 +1638,9 @@ class FlowBrowserTool:
 
         if all_urls:
             self._log_exec(f"Found {len(all_urls)} media URL(s) in Network logs. Downloading...")
-            self._download_files(all_urls)
+            # Use current prompt for folder naming
+            prompt_text = getattr(self, 'current_prompt', '')
+            self._download_files(all_urls, prompt_text)
             # Đánh dấu hoàn tất sau khi tải xong; phần finally sẽ đóng browser và chạy job kế tiếp
             try:
                 self._log_exec("Job completed. Closing browser now and continuing queue...", success=True)
@@ -1654,10 +1704,39 @@ class FlowBrowserTool:
             return urls
         return urls
 
-    def _download_files(self, urls):
+    def _sanitize_folder_name(self, text, max_length=50):
+        """Sanitize text for use as folder name, keeping it safe and readable."""
+        if not text:
+            return "no_prompt"
+        
+        # Remove or replace problematic characters
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', text)
+        # Replace multiple spaces with single space
+        sanitized = re.sub(r'\s+', ' ', sanitized)
+        # Remove leading/trailing spaces and dots
+        sanitized = sanitized.strip(' .')
+        # Truncate if too long
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length].rstrip()
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = "prompt"
+        
+        return sanitized
+
+    def _download_files(self, urls, prompt_text=""):
         try:
-            out_dir = Path(os.getcwd()) / "downloads" / time.strftime("%Y%m%d_%H%M%S")
+            # Create folder name using prompt-time format
+            if prompt_text:
+                sanitized_prompt = self._sanitize_folder_name(prompt_text)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                folder_name = f"{sanitized_prompt}-{timestamp}"
+            else:
+                folder_name = time.strftime("%Y%m%d_%H%M%S")
+            
+            out_dir = Path(os.getcwd()) / "downloads" / folder_name
             out_dir.mkdir(parents=True, exist_ok=True)
+            self._log_exec(f"Creating download folder: {folder_name}")
             for i, url in enumerate(urls, 1):
                 try:
                     ext = ".mp4"
@@ -1737,23 +1816,54 @@ class FlowBrowserTool:
                             driver.execute_script("arguments[0].scrollTop = 0;", target_listbox)
                         except Exception:
                             pass
+                        
+                        # Log all available options for debugging
+                        all_options = target_listbox.find_elements(By.XPATH, ".//*[@role='option']")
+                        self._log_exec(f"Available options in listbox: {[opt.text.strip() for opt in all_options]}")
+                        
                         for opt_text in option_texts:
+                            self._log_exec(f"Trying to select option: '{opt_text}'")
                             try:
                                 # Ưu tiên match exact theo span trong listbox mục tiêu
                                 el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{opt_text}']]")
+                                self._log_exec(f"Found exact match for: '{opt_text}'")
                                 driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
                                 self._human_click_el(driver, el)
                                 time.sleep(0.2)
+                                
+                                # Verify selection by checking if the option is now selected
+                                try:
+                                    selected_el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{opt_text}']")
+                                    if selected_el.get_attribute("data-state") == "checked":
+                                        self._log_exec(f"Successfully selected: '{opt_text}'")
+                                        return True
+                                    else:
+                                        self._log_exec(f"Option '{opt_text}' clicked but not selected")
+                                except Exception:
+                                    self._log_exec(f"Could not verify selection for: '{opt_text}'")
+                                
                                 return True
                             except Exception:
                                 # Fallback: contains text
                                 try:
                                     el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
+                                    self._log_exec(f"Found partial match for: '{opt_text}'")
                                     driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
                                     self._human_click_el(driver, el)
                                     time.sleep(0.2)
+                                    
+                                    # Verify selection
+                                    try:
+                                        selected_el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
+                                        if selected_el.get_attribute("data-state") == "checked":
+                                            self._log_exec(f"Successfully selected: '{opt_text}'")
+                                            return True
+                                    except Exception:
+                                        pass
+                                    
                                     return True
                                 except Exception:
+                                    self._log_exec(f"No match found for: '{opt_text}'")
                                     continue
 
                         # Nếu vẫn chưa tìm thấy, thử viewport nội bộ của Radix để scroll
@@ -1786,7 +1896,104 @@ class FlowBrowserTool:
         time.sleep(1)
 
         # 2) Outputs per prompt
-        select_from_combobox(["Câu trả lời đầu ra cho mỗi câu lệnh", "Outputs per prompt"], [outputs])
+        self._log_exec(f"Setting outputs per prompt to: {outputs}")
+        success = select_from_combobox(["Câu trả lời đầu ra cho mỗi câu lệnh", "Outputs per prompt"], [outputs])
+        if not success:
+            self._log_exec(f"Failed to select outputs per prompt: {outputs}")
+            # Try alternative approach - select by index
+            try:
+                combo = driver.find_element(By.XPATH, "//button[@role='combobox'][.//span[contains(text(), 'Câu trả lời') or contains(text(), 'Outputs')]]")
+                self._human_click_el(driver, combo)
+                time.sleep(0.5)
+                
+                # Get the listbox
+                listbox = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[@role='listbox']"))
+                )
+                
+                # Try to select by index (outputs-1 since it's 0-based)
+                try:
+                    index = int(outputs) - 1
+                    options = listbox.find_elements(By.XPATH, ".//*[@role='option']")
+                    if 0 <= index < len(options):
+                        self._log_exec(f"Selecting option by index: {index}")
+                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", options[index])
+                        self._human_click_el(driver, options[index])
+                        
+                        # Verify selection using JavaScript
+                        time.sleep(0.5)
+                        selected_option = driver.execute_script("""
+                            const listbox = arguments[0];
+                            const options = listbox.querySelectorAll('[role="option"]');
+                            for (let i = 0; i < options.length; i++) {
+                                if (options[i].getAttribute('data-state') === 'checked') {
+                                    return options[i].textContent.trim();
+                                }
+                            }
+                            return null;
+                        """, listbox)
+                        
+                        if selected_option == outputs:
+                            self._log_exec(f"Successfully selected outputs per prompt: {selected_option}")
+                            success = True
+                        else:
+                            self._log_exec(f"Selection verification failed. Expected: {outputs}, Got: {selected_option}")
+                            
+                except Exception as e:
+                    self._log_exec(f"Failed to select by index: {e}")
+                
+            except Exception as e:
+                self._log_exec(f"Alternative selection failed: {e}")
+        
+        # Final fallback: Use JavaScript to directly select the option
+        if not success:
+            self._log_exec("Trying JavaScript fallback method...")
+            try:
+                # Find the combobox and click it
+                combo = driver.find_element(By.XPATH, "//button[@role='combobox'][.//span[contains(text(), 'Câu trả lời') or contains(text(), 'Outputs')]]")
+                self._human_click_el(driver, combo)
+                time.sleep(0.5)
+                
+                # Use JavaScript to select the option directly
+                result = driver.execute_script("""
+                    const listbox = document.querySelector('[role="listbox"]');
+                    if (!listbox) return false;
+                    
+                    const options = listbox.querySelectorAll('[role="option"]');
+                    for (let i = 0; i < options.length; i++) {
+                        const span = options[i].querySelector('span');
+                        if (span && span.textContent.trim() === arguments[0]) {
+                            // First uncheck all options
+                            options.forEach(opt => {
+                                opt.setAttribute('data-state', 'unchecked');
+                                opt.setAttribute('aria-selected', 'false');
+                            });
+                            
+                            // Then check the target option
+                            options[i].setAttribute('data-state', 'checked');
+                            options[i].setAttribute('aria-selected', 'true');
+                            
+                            // Trigger click event
+                            options[i].click();
+                            return true;
+                        }
+                    }
+                    return false;
+                """, outputs)
+                
+                if result:
+                    self._log_exec(f"JavaScript fallback successful: selected {outputs}")
+                    success = True
+                else:
+                    self._log_exec(f"JavaScript fallback failed: could not find option {outputs}")
+                    
+            except Exception as e:
+                self._log_exec(f"JavaScript fallback error: {e}")
+        
+        if success:
+            self._log_exec(f"Successfully set outputs per prompt to: {outputs}")
+        else:
+            self._log_exec(f"Failed to set outputs per prompt to: {outputs}")
         time.sleep(1)
 
         # 3) Model
