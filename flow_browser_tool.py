@@ -19,6 +19,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
+from openpyxl import load_workbook
 
 
 class FlowBrowserTool:
@@ -69,6 +70,12 @@ class FlowBrowserTool:
         self.queue_running = False
         self.exec_driver = None
         self.stop_exec = False
+        # Synchronization for queue operations
+        self.queue_lock = threading.Lock()
+        # Per-account execution states and tracking
+        self.account_states = {}
+        self.exec_current_jobs = {}
+        self.exec_drivers = {}
 
         # Profiles (cache per email)
         self.flow_profiles_path = os.path.join(os.getcwd(), "chrome_cache", "flow_profiles.json")
@@ -278,7 +285,7 @@ class FlowBrowserTool:
 
         # Settings (popover) - Aspect ratio, Outputs per prompt, Model
         ttk.Label(cfg, text="Aspect ratio", style='Subtitle.TLabel').grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
-        self.aspect_ratio = ttk.Combobox(cfg, values=["16:9", "9:16", "1:1"], state="readonly")
+        self.aspect_ratio = ttk.Combobox(cfg, values=["16:9", "9:16"], state="readonly")
         self.aspect_ratio.set("16:9")
         self.aspect_ratio.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(8, 0))
 
@@ -308,6 +315,8 @@ class FlowBrowserTool:
         
         ttk.Button(action_frame, text="⏹️ Stop", command=self._stop_execution, style='Secondary.TButton').pack(side=tk.RIGHT, padx=(0, 10))
         ttk.Button(action_frame, text="▶️ Execute", command=self._execute_workflow, style='Accent.TButton').pack(side=tk.RIGHT)
+        ttk.Button(action_frame, text="📥 Import Excel", command=self._import_excel_and_dispatch, style='Secondary.TButton').pack(side=tk.LEFT)
+        ttk.Button(action_frame, text="⬇️ Tải Template", command=self._download_excel_template, style='Secondary.TButton').pack(side=tk.LEFT, padx=(10, 0))
 
         self.exec_status = ttk.Label(ex, text="✅ Sẵn sàng", style='Success.TLabel')
         self.exec_status.grid(row=7, column=0, columnspan=3, sticky=tk.W)
@@ -554,7 +563,7 @@ class FlowBrowserTool:
             self.driver = self._build_chrome(email_addr, existing_cache_dir=exist_dir)
 
             # Go to Flow
-            self.driver.get("https://labs.google/fx/tools/flow")
+            self.driver.get("https://labs.google/fx/vi/tools/flow")
             self._human_delay(2, 4)
 
             # If not signed in, go through Google sign-in
@@ -610,7 +619,7 @@ class FlowBrowserTool:
                 raise Exception("Không thể đăng nhập tài khoản Google")
 
             # After Google is signed in, open Flow
-            self.driver.get("https://labs.google/fx/tools/flow")
+            self.driver.get("https://labs.google/fx/vi/tools/flow")
             self._wait_until(lambda: "labs.google" in self.driver.current_url, timeout=120)
 
             # If Flow presents a final "Sign in with Google" gate, click it
@@ -638,6 +647,109 @@ class FlowBrowserTool:
             self.login_btn.config(state="normal")
 
     # ===================== Execute Media =====================
+    def _import_excel_and_dispatch(self) -> None:
+        try:
+            path = filedialog.askopenfilename(title="Chọn file Excel", filetypes=[("Excel", "*.xlsx")])
+            if not path:
+                return
+            wb = load_workbook(filename=path, read_only=True, data_only=True)
+            ws = wb.active
+            rows = []
+            # Expected columns now: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model (header optional)
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if row is None:
+                    continue
+                # Skip header if first row contains strings like 'workflow'
+                if i == 0 and row and isinstance(row[0], str) and 'workflow' in row[0].lower():
+                    continue
+                wf = (row[0] or '').strip() if len(row) > 0 and row[0] else ''
+                prompt = (row[1] or '').strip() if len(row) > 1 and row[1] else ''
+                media = (row[2] or '').strip() if len(row) > 2 and row[2] else ''
+                aspect_ratio = (row[3] or '').strip() if len(row) > 3 and row[3] else ''
+                outputs = (row[4] or '').strip() if len(row) > 4 and row[4] else ''
+                model = (row[5] or '').strip() if len(row) > 5 and row[5] else ''
+                if wf:
+                    rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+            if not rows:
+                messagebox.showerror("Lỗi", "Không có dữ liệu hợp lệ trong file Excel!")
+                return
+            # Determine available accounts from profiles
+            available_emails = [e for e in self.flow_profiles.keys()]
+            if not available_emails:
+                messagebox.showerror("Lỗi", "Chưa có account nào trong cache!")
+                return
+            # Round-robin distribute tasks across accounts
+            idx = 0
+            for r in rows:
+                target_email = available_emails[idx % len(available_emails)]
+                idx += 1
+                meta = self.flow_profiles.get(target_email)
+                if not meta:
+                    continue
+                wf = r.get('wf') or 'frames_to_video'
+                prompt = r.get('prompt') or ''
+                media = r.get('media') or ''
+                settings = {
+                    'aspect_ratio': r.get('aspect_ratio') or '',
+                    'outputs': r.get('outputs') or '',
+                    'model': r.get('model') or ''
+                }
+                # Reuse existing enqueue/start logic per-account, passing settings
+                self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings)
+            self._log_exec(f"Imported {len(rows)} row(s) from Excel and dispatched to accounts.")
+            self._refresh_jobs_view()
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể import Excel: {ex}")
+
+    def _download_excel_template(self) -> None:
+        try:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+                initialfile="flow_template.xlsx",
+                title="Lưu template Excel"
+            )
+            if not path:
+                return
+            from openpyxl import Workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Tasks"
+            # Pull options from current UI to ensure valid values
+            ar_values = list(self.aspect_ratio.cget('values')) if hasattr(self, 'aspect_ratio') else ["16:9", "9:16"]
+            op_values = list(self.outputs_per_prompt.cget('values')) if hasattr(self, 'outputs_per_prompt') else ["1", "2", "3", "4"]
+            md_values = list(self.model_choice.cget('values')) if hasattr(self, 'model_choice') else ["Veo 3 - Fast", "Veo 2 - Fast", "Veo 3 - Quality", "Veo 2 - Quality"]
+
+            ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])  # header
+            # three sample rows using valid options
+            ws.append(["text_to_video", "A cinematic sunset over mountains", "", ar_values[0], op_values[-1], md_values[0]])
+            ws.append(["frames_to_video", "", "/absolute/path/to/frames/folder", ar_values[1] if len(ar_values) > 1 else ar_values[0], op_values[0], md_values[-1]])
+            ws.append(["text_to_video", "A neon-lit cyberpunk city at night", "", ar_values[2] if len(ar_values) > 2 else ar_values[0], op_values[1] if len(op_values) > 1 else op_values[0], md_values[1] if len(md_values) > 1 else md_values[0]])
+            wb.save(path)
+            try:
+                self._log_exec(f"Đã lưu template Excel: {path}")
+            except Exception:
+                pass
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể tạo template: {ex}")
+
+    def _enqueue_or_start_account_job(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict = None) -> None:
+        job = {"email": email_addr, "meta": meta, "wf": wf, "prompt": prompt, "media": media, "settings": settings or {}}
+        st = self.account_states.get(email_addr)
+        if st is None:
+            st = {'queue': [], 'running': False, 'lock': threading.Lock()}
+            self.account_states[email_addr] = st
+        with st['lock']:
+            if st['running']:
+                st['queue'].append(job)
+                action = "queue"
+            else:
+                st['running'] = True
+                action = "start"
+        if action == "queue":
+            self._log_exec(f"Queued job for {email_addr} ({wf}) from Excel")
+        else:
+            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media, job['settings']), daemon=True).start()
     def _open_flow_for_exec(self) -> None:
         email_addr = self.exec_email.get()
         if not email_addr:
@@ -680,27 +792,37 @@ class FlowBrowserTool:
             return
         # Build a job
         job = {"email": email_addr, "meta": meta, "wf": wf, "prompt": prompt, "media": media}
-        # If running, enqueue; else start and mark running
-        if self.exec_driver is not None or self.queue_running:
-            self.exec_queue.append(job)
-            self.queue_running = True
+        # Per-account queueing and start decision
+        st = self.account_states.get(email_addr)
+        if st is None:
+            st = {'queue': [], 'running': False, 'lock': threading.Lock()}
+            self.account_states[email_addr] = st
+        with st['lock']:
+            if st['running']:
+                st['queue'].append(job)
+                action = "queue"
+            else:
+                st['running'] = True
+                action = "start"
+        if action == "queue":
             self._log_exec(f"Queued job for {email_addr} ({wf})")
             self._refresh_jobs_view()
         else:
-            self.queue_running = True
-            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media), daemon=True).start()
+            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media, {}), daemon=True).start()
 
-    def _execute_thread(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str) -> None:
+    def _execute_thread(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict) -> None:
         try:
             self._log_exec("Opening Flow page...")
             drv = self._open_profile_driver(meta)
-            self.exec_driver = drv
+            # Track driver per account to allow concurrent runs
+            self.exec_drivers[email_addr] = drv
             self.stop_exec = False
             # Store current prompt for folder naming
             self.current_prompt = prompt
             # set current job and refresh view
             try:
-                self.exec_current_job = {"email": email_addr, "wf": wf, "prompt": prompt, "media": media}
+                # Track current job per account for UI
+                self.exec_current_jobs[email_addr] = {"email": email_addr, "wf": wf, "prompt": prompt, "media": media}
                 self._refresh_jobs_view()
             except Exception:
                 pass
@@ -710,33 +832,14 @@ class FlowBrowserTool:
             if not loaded:
                 self._log_exec("Failed to load Flow page", error=True)
                 return
-            time.sleep(2)
+            time.sleep(5)
 
             # Choose workflow
             self._log_exec("Click New project (if visible)...")
-            # Mở/nhấn nút tạo dự án mới trước khi chọn workflow
             try:
-                old_url = drv.current_url
-                self._click_new_project(drv)
-                # Theo yêu cầu: đợi 5s sau khi nhấn và đợi trang mới load xong
-                self._log_exec("Waiting 5s for project page to open...")
-                time.sleep(5)
-                self._log_exec("Waiting for workspace to load...")
-                # Đợi URL thay đổi hoặc các phần tử chính của workspace xuất hiện
-                def page_ready():
-                    try:
-                        if drv.current_url != old_url:
-                            return True
-                        if drv.find_elements(By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID"):
-                            return True
-                        if drv.find_elements(By.CSS_SELECTOR, "button[role='combobox']"):
-                            return True
-                    except Exception:
-                        pass
-                    return False
-                ready = self._wait_until(page_ready, timeout=30, interval=0.5)
+                ready = self._ensure_workspace_ready(drv, max_attempts=3, wait_seconds=10)
                 if not ready:
-                    self._log_exec("Workspace not detected after New project. Continuing best-effort...", error=False)
+                    self._log_exec("Workspace not detected after retries. Continuing best-effort...", error=False)
             except Exception:
                 self._log_exec("New project button not found - continue")
 
@@ -774,7 +877,14 @@ class FlowBrowserTool:
             # Áp dụng các setting trong popover (Aspect ratio, Outputs per prompt, Model)
             try:
                 self._log_exec("Opening settings popover and applying options...")
-                self._open_settings_and_apply(drv, self.aspect_ratio.get(), self.outputs_per_prompt.get(), self.model_choice.get())
+                # Prefer per-row settings if provided; fallback to UI selections
+                ar = (settings.get('aspect_ratio') or '').strip() if isinstance(settings, dict) else ''
+                op = (settings.get('outputs') or '').strip() if isinstance(settings, dict) else ''
+                md = (settings.get('model') or '').strip() if isinstance(settings, dict) else ''
+                aspect_to_use = ar if ar else self.aspect_ratio.get()
+                outputs_to_use = op if op else self.outputs_per_prompt.get()
+                model_to_use = md if md else self.model_choice.get()
+                self._open_settings_and_apply(drv, aspect_to_use, outputs_to_use, model_to_use)
                 self._log_exec("Settings applied.")
             except Exception as ex:
                 self._log_exec(f"Failed to apply settings: {ex}", error=True)
@@ -850,25 +960,38 @@ class FlowBrowserTool:
             self._log_exec(f"Execute error: {ex}", error=True)
         finally:
             try:
-                if self.exec_driver is not None:
-                    self.exec_driver.quit()
+                local_drv = self.exec_drivers.get(email_addr)
+                if local_drv is not None:
+                    local_drv.quit()
             except Exception:
                 pass
-            self.exec_driver = None
+            try:
+                if email_addr in self.exec_drivers:
+                    del self.exec_drivers[email_addr]
+            except Exception:
+                pass
             self.stop_exec = False
             # clear current job and refresh
             try:
-                self.exec_current_job = None
+                if email_addr in self.exec_current_jobs:
+                    del self.exec_current_jobs[email_addr]
                 self._refresh_jobs_view()
             except Exception:
                 pass
 
             # Auto-run next queued job if available
             try:
+                st = self.account_states.get(email_addr)
                 next_job = None
-                if self.exec_queue:
-                    next_job = self.exec_queue.pop(0)
-                if next_job:
+                if st is None:
+                    st = {'queue': [], 'running': False, 'lock': threading.Lock()}
+                    self.account_states[email_addr] = st
+                with st['lock']:
+                    if st['queue']:
+                        next_job = st['queue'].pop(0)
+                    else:
+                        st['running'] = False
+                if next_job is not None:
                     self._log_exec(f"Starting next queued job for {next_job['email']} ({next_job['wf']})")
                     threading.Thread(
                         target=self._execute_thread,
@@ -876,10 +999,15 @@ class FlowBrowserTool:
                         daemon=True,
                     ).start()
                 else:
-                    self.queue_running = False
-                    self._log_exec("All jobs completed", success=True)
+                    self._log_exec(f"All jobs completed for {email_addr}", success=True)
             except Exception as ex:
-                self.queue_running = False
+                try:
+                    st = self.account_states.get(email_addr)
+                    if st:
+                        with st['lock']:
+                            st['running'] = False
+                except Exception:
+                    pass
                 self._log_exec(f"Queue scheduling error: {ex}", error=True)
 
     def _refresh_jobs_view(self) -> None:
@@ -895,19 +1023,30 @@ class FlowBrowserTool:
                     prompt = prompt[:117] + '...'
                 return (job.get('email') or '', job.get('wf') or '', img, prompt)
 
-            # Running table
+            # Running table (show the most recently updated running job)
             if hasattr(self, 'running_tree'):
                 for i in self.running_tree.get_children():
                     self.running_tree.delete(i)
-                if self.exec_current_job:
-                    self.running_tree.insert('', tk.END, values=fmt_row(self.exec_current_job))
+                try:
+                    if self.exec_current_jobs:
+                        any_job = list(self.exec_current_jobs.values())[-1]
+                        self.running_tree.insert('', tk.END, values=fmt_row(any_job))
+                except Exception:
+                    pass
 
-            # Queue table
+            # Queue table: aggregate across accounts
             if hasattr(self, 'queue_tree'):
                 for i in self.queue_tree.get_children():
                     self.queue_tree.delete(i)
-                for j in self.exec_queue:
-                    self.queue_tree.insert('', tk.END, values=fmt_row(j))
+                try:
+                    aggregate = []
+                    for _, st in self.account_states.items():
+                        with st['lock']:
+                            aggregate.extend(list(st['queue']))
+                    for j in aggregate:
+                        self.queue_tree.insert('', tk.END, values=fmt_row(j))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -942,10 +1081,75 @@ class FlowBrowserTool:
         for xp in candidates:
             try:
                 el = driver.find_element(By.XPATH, xp)
-                self._human_click_el(driver, el)
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                except Exception:
+                    pass
+                try:
+                    self._human_click_el(driver, el)
+                except Exception:
+                    try:
+                        driver.execute_script("arguments[0].click();", el)
+                    except Exception:
+                        continue
                 return
             except Exception:
                 continue
+    
+    def _ensure_workspace_ready(self, driver: webdriver.Chrome, max_attempts: int = 3, wait_seconds: int = 10) -> bool:
+        try:
+            def page_ready(before_url: str) -> bool:
+                try:
+                    if driver.current_url != before_url:
+                        return True
+                    if driver.find_elements(By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID"):
+                        return True
+                    if driver.find_elements(By.CSS_SELECTOR, "button[role='combobox']"):
+                        return True
+                except Exception:
+                    pass
+                return False
+
+            def new_project_exists() -> bool:
+                xps = [
+                    "//button[normalize-space()='New project']",
+                    "//button[contains(., 'New project')]",
+                    "//a[normalize-space()='New project']",
+                    "//a[contains(., 'New project')]",
+                    "//button[normalize-space()='Dự án mới']",
+                    "//button[contains(., 'Dự án mới')]",
+                    "//a[normalize-space()='Dự án mới']",
+                    "//a[contains(., 'Dự án mới')]",
+                ]
+                for xp in xps:
+                    try:
+                        if driver.find_elements(By.XPATH, xp):
+                            return True
+                    except Exception:
+                        continue
+                return False
+
+            attempt = 0
+            while attempt < max_attempts:
+                before_url = driver.current_url
+                self._click_new_project(driver)
+                self._log_exec(f"Waiting {wait_seconds}s for workspace to appear (attempt {attempt+1}/{max_attempts})...")
+                time.sleep(wait_seconds)
+                ready = self._wait_until(lambda: page_ready(before_url), timeout=10, interval=0.5)
+                if ready:
+                    return True
+                if new_project_exists():
+                    attempt += 1
+                    continue
+                try:
+                    driver.get("https://labs.google/fx/vi/tools/flow")
+                except Exception:
+                    pass
+                time.sleep(3)
+                attempt += 1
+            return False
+        except Exception:
+            return False
 
     def _select_workflow_via_combobox(self, driver: webdriver.Chrome, wf: str) -> None:
         """Mở combobox (button[role="combobox"]) và chọn mục theo wf.
@@ -1507,20 +1711,17 @@ class FlowBrowserTool:
                 running = driver.find_elements(By.XPATH, "//*[contains(translate(normalize-space(text()), 'RUNNING', 'running'), 'running') or contains(@class,'running')]")
             except Exception:
                 running = []
-            # Tiến trình phần trăm: ưu tiên cấu trúc text_to_video nếu xác định, fallback '%' chung
-            percents = []
+            # Tiến trình phần trăm: chỉ bám theo text có ký tự '%', giới hạn chuỗi ngắn để tránh nhiễu
             try:
-                if wf == "text_to_video":
-                    # Phần trăm nằm trong khối progress của card: sc-dd6abb21-1
-                    percents = driver.find_elements(By.XPATH, "//*[contains(@class,'sc-dd6abb21-1')]")
+                percents = driver.find_elements(By.XPATH, "//*[contains(normalize-space(text()), '%') and string-length(normalize-space(text())) <= 6]")
             except Exception:
                 percents = []
-            if not percents:
-                try:
-                    percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
-                except Exception:
-                    percents = []
-            return (len(running) > 0) or (len(percents) > 0)
+            # Nếu có container style="overflow-anchor: none", ưu tiên xem trong đó
+            try:
+                anchor_percents = driver.find_elements(By.XPATH, "//*[@style='overflow-anchor: none']//*[contains(normalize-space(text()), '%') and string-length(normalize-space(text())) <= 6]")
+            except Exception:
+                anchor_percents = []
+            return (len(running) > 0) or (len(percents) > 0) or (len(anchor_percents) > 0)
 
         def list_videos():
             """Get actual result videos, not placeholders or loading videos."""
@@ -1643,7 +1844,16 @@ class FlowBrowserTool:
                     return True
 
                 vids = list_videos()
-                self._log_exec(f"Checking video readiness: found {len(vids)} videos, expected {expected_videos}")
+                # For frames_to_video, if no videos yet, derive from percent nodes to avoid confusing log
+                if wf == "frames_to_video" and len(vids) == 0:
+                    try:
+                        anchor_nodes = driver.find_elements(By.XPATH, "//*[@style='overflow-anchor: none']//*[contains(normalize-space(text()), '%') and string-length(normalize-space(text())) <= 6]")
+                    except Exception:
+                        anchor_nodes = []
+                    derived_total = len(anchor_nodes)
+                    self._log_exec(f"Checking video readiness (frames_to_video): found 0 videos, derived {derived_total} processing cards from %")
+                else:
+                    self._log_exec(f"Checking video readiness: found {len(vids)} videos, expected {expected_videos}")
                 
                 # If we have fewer videos than expected, not ready yet
                 if len(vids) < expected_videos:
@@ -1675,169 +1885,92 @@ class FlowBrowserTool:
                 self._log_exec(f"Error checking video readiness: {e}")
                 return False
 
-        # Poll tối đa 4 phút (240s) cho giai đoạn xử lý
+        # Poll API bằng cách reload trang mỗi 10s, tối đa 3 phút, đến khi đủ media URL(s)
         start = time.time()
-        stable_zero_checks = 0
-        while time.time() - start < 240:
-            if self.stop_exec:
-                self._log_exec("Stopped by user during monitoring")
-                return
-            try:
-                if wf == "text_to_video":
-                    cards = list_t2v_cards()
-                    total = len(cards)
-                    ready_cnt = 0
-                    processing_cards = 0
-                    for c in cards:
-                        if is_t2v_card_ready(c):
-                            ready_cnt += 1
-                        elif t2v_card_has_progress(c):
-                            processing_cards += 1
-                    # For logging, reflect card-based processing
-                    processing = max(0, min(expected_videos, total) - ready_cnt)
-                    elapsed = int(time.time() - start)
-                    elapsed_str = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
-                    self._log_exec(f"Processing status (cards): remaining {processing}/{total} | elapsed {elapsed_str}")
-                    # Stable zero tracking
-                    if processing == 0 and total >= expected_videos:
-                        stable_zero_checks += 1
-                        self._log_exec(f"Stable zero checks: {stable_zero_checks}/2")
-                    else:
-                        stable_zero_checks = 0
-                    # Log a sample percent if exists
-                    try:
-                        if cards:
-                            last_card = cards[-1]
-                            # Prioritize percent inside the last card
-                            perc_nodes = last_card.find_elements(By.XPATH, ".//*[contains(@class,'sc-dd6abb21-1') or contains(text(), '%')]")
-                            if perc_nodes:
-                                txt = perc_nodes[0].text.strip()
-                                if txt.endswith('%') or '%' in txt:
-                                    self._log_exec(f"Progress (last card): {txt}")
-                    except Exception:
-                        pass
-                else:
-                    vids = list_videos()
-                    total = len(vids)
-                    ready_cnt = 0
-                    for v in vids:
-                        if is_card_ready_from_video(v):
-                            ready_cnt += 1
-                
-                # Calculate processing count more accurately
-                if wf != "text_to_video":
-                    if total >= expected_videos:
-                        processing = max(0, expected_videos - ready_cnt)
-                    else:
-                        processing = max(0, total - ready_cnt)
-                # Tổng thời gian đã đếm (mm:ss)
-                if wf != "text_to_video":
-                    try:
-                        elapsed = int(time.time() - start)
-                        elapsed_str = f"{elapsed // 60:02d}:{elapsed % 60:02d}"
-                    except Exception:
-                        elapsed_str = "00:00"
-                    self._log_exec(f"Processing status: remaining {processing}/{total} | elapsed {elapsed_str}")
-                    if processing == 0 and total >= expected_videos:
-                        stable_zero_checks += 1
-                        self._log_exec(f"Stable zero checks: {stable_zero_checks}/2")
-                    else:
-                        stable_zero_checks = 0
-                    percents = driver.find_elements(By.XPATH, "//*[contains(text(), '%')]")
-                    if percents:
-                        txt = percents[0].text.strip()
-                        if txt.endswith('%'):
-                            self._log_exec(f"Progress hint: {txt}")
-            except Exception:
-                pass
+        last_reload = 0.0
+        collected_urls = set()
+        target_fragment = '/fx/api/trpc/project.searchProjectWorkflows'
 
-            # Điều kiện kết thúc: tất cả ready theo rule hoặc 2 lần liên tiếp remaining==0
-            if all_videos_ready() or stable_zero_checks >= 2:
-                break
-            time.sleep(5)
-
-        # Kiểm tra lần cuối
-        videos = list_videos()
-        self._log_exec(f"Final check: found {len(videos)} videos, expected {expected_videos}")
-        
-        if len(videos) < expected_videos or is_any_running_or_progress():
-            # Fallback heuristic: nếu thấy card kết quả đã hiện model + prompt (đã hoàn tất), vẫn tiếp tục
-            try:
-                summary_cards = driver.find_elements(By.XPATH, "//*[contains(@class,'sc-43558102-9') or contains(., 'Veo ')][contains(., '-')]")
-                if summary_cards:
-                    self._log_exec("Detected summary cards; proceeding to read API")
-                else:
-                    self._log_exec(f"Not all videos are ready yet ({len(videos)} < {expected_videos}); proceeding best-effort with available results")
-            except Exception:
-                self._log_exec(f"Not all videos are ready yet ({len(videos)} < {expected_videos}); proceeding best-effort with available results")
-        else:
-            self._log_exec(f"All {expected_videos} videos are ready, proceeding to read API")
-
-        # Reload trước khi đọc API để đồng bộ trạng thái
+        # Bật Network nếu cần (an toàn khi gọi nhiều lần)
         try:
-            self._log_exec("Reloading page to finalize state before reading API...")
-            driver.refresh()
-            time.sleep(2)
+            driver.execute_cdp_cmd('Network.enable', {})
         except Exception:
             pass
 
-        self._log_exec(f"Found {len(videos)} video(s). Reading Network logs for API JSON...")
-        try:
-            logs = driver.get_log('performance')
-        except Exception:
-            logs = []
+        while True:
+            if self.stop_exec:
+                self._log_exec("Stopped by user during monitoring")
+                return
 
-        # Tìm response của API project.searchProjectWorkflows từ performance logs
-        target_fragment = '/fx/api/trpc/project.searchProjectWorkflows'
-        request_ids = []
-        for item in logs:
-            try:
-                msg = json.loads(item.get('message', '{}')).get('message', {})
-                method = msg.get('method')
-                params = msg.get('params', {})
-                if method == 'Network.responseReceived':
-                    response = params.get('response', {})
-                    url = response.get('url', '')
-                    if target_fragment in url and response.get('mimeType', '').startswith('application/json'):
-                        request_ids.append(params.get('requestId'))
-            except Exception:
-                continue
-
-        # Lấy response body qua CDP cho từng request id tìm thấy
-        all_urls = []
-        for rid in request_ids:
-            try:
-                body = driver.execute_cdp_cmd('Network.getResponseBody', {'requestId': rid})
-                text = body.get('body', '')
+            now = time.time()
+            if now - last_reload >= 10:
                 try:
-                    data = json.loads(text)
+                    self._log_exec("Reloading page to check TRPC API responses...")
+                    driver.refresh()
+                    time.sleep(2)
                 except Exception:
-                    data = text
-                urls = self._extract_fife_uris_from_api_json(data)
-                all_urls.extend(urls)
-            except Exception:
-                continue
+                    pass
+                last_reload = now
 
+            # Đọc performance logs và thu thập response bodies của API mục tiêu
+            try:
+                logs = driver.get_log('performance')
+            except Exception:
+                logs = []
+
+            request_ids = []
+            for item in logs:
+                try:
+                    msg = json.loads(item.get('message', '{}')).get('message', {})
+                    method = msg.get('method')
+                    params = msg.get('params', {})
+                    if method == 'Network.responseReceived':
+                        response = params.get('response', {})
+                        url = response.get('url', '')
+                        if target_fragment in url and response.get('mimeType', '').startswith('application/json'):
+                            request_ids.append(params.get('requestId'))
+                except Exception:
+                    continue
+
+            for rid in request_ids:
+                try:
+                    body = driver.execute_cdp_cmd('Network.getResponseBody', {'requestId': rid})
+                    text = body.get('body', '')
+                    try:
+                        data = json.loads(text)
+                    except Exception:
+                        data = text
+                    urls = self._extract_fife_uris_from_api_json(data)
+                    for u in urls:
+                        collected_urls.add(u)
+                except Exception:
+                    continue
+
+            self._log_exec(f"API media collected: {len(collected_urls)}/{expected_videos}")
+
+            if len(collected_urls) >= expected_videos:
+                break
+            if time.time() - start >= 180:
+                self._log_exec("Timeout 3 minutes reached. Proceeding to download available media.")
+                break
+            time.sleep(1)
+
+        all_urls = list(collected_urls)
         if all_urls:
-            self._log_exec(f"Found {len(all_urls)} media URL(s) in Network logs. Downloading...")
-            # Use current prompt for folder naming
+            self._log_exec(f"Found {len(all_urls)} media URL(s) from API. Downloading...")
             prompt_text = getattr(self, 'current_prompt', '')
             self._download_files(all_urls, prompt_text)
-            # Đánh dấu hoàn tất sau khi tải xong; phần finally sẽ đóng browser và chạy job kế tiếp
             try:
                 self._log_exec("Job completed. Closing browser now and continuing queue...", success=True)
-                # Đóng browser ngay sau khi tải xong
                 try:
                     if self.exec_driver is not None:
                         self.exec_driver.quit()
                 except Exception:
                     pass
-                # Trả về để khép tiến trình; finally trong _execute_thread sẽ lên lịch job tiếp theo
                 return
             except Exception:
                 pass
         else:
-            # Không có URL từ API => coi như failed và báo người dùng
             self._log_exec("No API JSON or no media URLs extracted - marking as failed", error=True)
             try:
                 messagebox.showerror("Thất bại", "Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.")
@@ -1931,10 +2064,7 @@ class FlowBrowserTool:
                     self._log_exec(f"Downloaded {filename}", success=True)
                 except Exception as ex:
                     self._log_exec(f"Failed to download #{i}: {ex}", error=True)
-            try:
-                messagebox.showinfo("Hoàn tất", f"Đã tải {len(urls)} file về: {out_dir}")
-            except Exception:
-                pass
+            # No popup: silently finish; the outer finally will close browser and continue queue
         except Exception as ex:
             self._log_exec(f"Download error: {ex}", error=True)
 
@@ -2342,6 +2472,10 @@ class FlowBrowserTool:
                 f"//*[@role='listbox']//*[contains(@class,'sc-acb5d8f5-2') and @role='option' and .//span[normalize-space(text())='{text}']]",
             ]
 
+
+
+
+
             for xp in candidates:
                 try:
                     el = driver.find_element(By.XPATH, xp)
@@ -2366,6 +2500,9 @@ class FlowBrowserTool:
 
             # Fallback cuối: duyệt tất cả role=option và chọn item có aria-selected='true' gần text (nếu text rút gọn)
             try:
+                
+                
+                # dsasa
                 options = driver.find_elements(By.XPATH, "//*[@role='listbox']//*[@role='option']")
                 for opt in options:
                     try:
