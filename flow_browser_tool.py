@@ -655,6 +655,14 @@ class FlowBrowserTool:
             wb = load_workbook(filename=path, read_only=True, data_only=True)
             ws = wb.active
             rows = []
+            # Safely convert any Excel cell value to trimmed string
+            def _cell_to_str(val):
+                try:
+                    if val is None:
+                        return ''
+                    return str(val).strip()
+                except Exception:
+                    return ''
             # Expected columns now: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model (header optional)
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if row is None:
@@ -662,12 +670,12 @@ class FlowBrowserTool:
                 # Skip header if first row contains strings like 'workflow'
                 if i == 0 and row and isinstance(row[0], str) and 'workflow' in row[0].lower():
                     continue
-                wf = (row[0] or '').strip() if len(row) > 0 and row[0] else ''
-                prompt = (row[1] or '').strip() if len(row) > 1 and row[1] else ''
-                media = (row[2] or '').strip() if len(row) > 2 and row[2] else ''
-                aspect_ratio = (row[3] or '').strip() if len(row) > 3 and row[3] else ''
-                outputs = (row[4] or '').strip() if len(row) > 4 and row[4] else ''
-                model = (row[5] or '').strip() if len(row) > 5 and row[5] else ''
+                wf = _cell_to_str(row[0]) if len(row) > 0 else ''
+                prompt = _cell_to_str(row[1]) if len(row) > 1 else ''
+                media = _cell_to_str(row[2]) if len(row) > 2 else ''
+                aspect_ratio = _cell_to_str(row[3]) if len(row) > 3 else ''
+                outputs = _cell_to_str(row[4]) if len(row) > 4 else ''
+                model = _cell_to_str(row[5]) if len(row) > 5 else ''
                 if wf:
                     rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
             if not rows:
@@ -929,8 +937,8 @@ class FlowBrowserTool:
                     self._click_create_button(drv)
                     self._log_exec("Clicked 'Tạo' successfully.")
                     # Chờ 10s rồi theo dõi tiến trình và tải kết quả
-                    self._log_exec("Waiting 10s before monitoring processing...")
-                    time.sleep(10)
+                    self._log_exec("Waiting 100s before monitoring processing...")
+                    time.sleep(100)
                     self._log_exec("Monitoring processing and then reading API logs...")
                     self._monitor_and_fetch_api(drv, wf="frames_to_video")
                     # ĐÃ HOÀN TẤT Frames to Video: return ngay để không chạy các bước Submit/Monitor chung bên dưới
