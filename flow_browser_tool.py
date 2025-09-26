@@ -1003,7 +1003,7 @@ class FlowBrowserTool:
                     self._log_exec(f"Starting next queued job for {next_job['email']} ({next_job['wf']})")
                     threading.Thread(
                         target=self._execute_thread,
-                        args=(next_job['email'], next_job['meta'], next_job['wf'], next_job['prompt'], next_job['media']),
+                        args=(next_job['email'], next_job['meta'], next_job['wf'], next_job['prompt'], next_job['media'], next_job.get('settings', {})),
                         daemon=True,
                     ).start()
                 else:
