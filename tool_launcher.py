@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sys
+import os
+import subprocess
 import traceback
 
 # Optional modern theming with ttkbootstrap
@@ -29,6 +31,56 @@ def _launch_gmail():
 _selected_launcher = None
 
 
+def _spawn_tool(entry: str) -> None:
+    """Spawn a new detached process of this program with an entry selector.
+
+    - On frozen/EXE builds: re-run `sys.executable` (the same .exe) with `--entry` arg
+    - On dev mode: re-run the current script with the same interpreter
+    """
+    try:
+        if getattr(sys, 'frozen', False):
+            # PyInstaller executable
+            cmd = [sys.executable, f"--entry={entry}"]
+        else:
+            # Running as script: prefer project venv interpreter if present
+            script_path = os.path.abspath(__file__)
+            project_root = os.path.dirname(script_path)
+            venv_py_posix = os.path.join(project_root, 'venv', 'bin', 'python')
+            venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
+            python_exec = sys.executable
+            try:
+                if os.name == 'nt' and os.path.exists(venv_py_win):
+                    python_exec = venv_py_win
+                elif os.name != 'nt' and os.path.exists(venv_py_posix):
+                    python_exec = venv_py_posix
+            except Exception:
+                pass
+            cmd = [python_exec, script_path, f"--entry={entry}"]
+
+        creationflags = 0
+        start_new_session = False
+        try:
+            # Windows: fully detach the child GUI process
+            creationflags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        except Exception:
+            creationflags = 0
+        # POSIX: start new session to detach
+        start_new_session = os.name != 'nt'
+
+        subprocess.Popen(
+            cmd,
+            close_fds=True,
+            creationflags=creationflags,
+            start_new_session=start_new_session,
+        )
+    except Exception:
+        # Fallback: run inline if spawn fails to avoid dead-end UX
+        if entry == 'flow':
+            _launch_flow()
+        elif entry == 'gmail':
+            _launch_gmail()
+
+
 def _select_and_quit(root: tk.Tk, launcher: callable) -> None:
     global _selected_launcher
     _selected_launcher = launcher
@@ -39,6 +91,20 @@ def _select_and_quit(root: tk.Tk, launcher: callable) -> None:
             root.quit()
         except Exception:
             pass
+
+
+def _spawn_and_quit(root: tk.Tk, entry: str) -> None:
+    """Spawn selected tool in a fresh process, then quit the launcher UI."""
+    try:
+        _spawn_tool(entry)
+    finally:
+        try:
+            root.after(10, root.quit)
+        except Exception:
+            try:
+                root.quit()
+            except Exception:
+                pass
 
 
 def main() -> None:
@@ -72,7 +138,7 @@ def main() -> None:
     btn_flow = ttk.Button(
         container,
         text="🎬 Veo3",
-        command=lambda: _select_and_quit(root, _launch_flow),
+        command=lambda: _spawn_and_quit(root, 'flow'),
         width=24
     )
     btn_flow.grid(row=1, column=0, padx=8, pady=8, sticky=(tk.W, tk.E))
@@ -113,27 +179,39 @@ def main() -> None:
 
     root.mainloop()
 
-    # After the launcher window is closed, run the selected tool
-    global _selected_launcher
-    if _selected_launcher is not None:
+
+if __name__ == "__main__":
+    # Support CLI entry selection: --entry=flow | --entry=gmail
+    entry_arg = next((a for a in sys.argv[1:] if a.startswith("--entry=")), None)
+    if entry_arg:
+        entry = entry_arg.split("=", 1)[1]
         try:
-            _selected_launcher()
-        except Exception as e:
-            # Try to show a minimal error dialog so the user isn't left with a black screen
+            if entry == 'flow':
+                _launch_flow()
+            elif entry == 'gmail':
+                _launch_gmail()
+            else:
+                main()
+        except ModuleNotFoundError as e:
+            # Friendly guidance to install dependencies
+            msg = (
+                "Thiếu thư viện Python: " + str(e) + "\n\n"
+                "Hướng dẫn khắc phục:\n"
+                "1) Đảm bảo đã tạo venv và cài requirements:\n"
+                "   - Windows: venv\\Scripts\\python -m pip install -r requirements.txt\n"
+                "   - macOS/Linux: venv/bin/python -m pip install -r requirements.txt\n\n"
+                "2) Sau đó chạy lại công cụ."
+            )
             try:
                 _tmp = tk.Tk()
                 _tmp.withdraw()
-                messagebox.showerror(
-                    "Tool error",
-                    f"Đã xảy ra lỗi khi chạy tool:\n{e}\n\n" +
-                    ("\n".join(traceback.format_exc().splitlines()[-6:]))
-                )
+                messagebox.showerror("Thiếu thư viện", msg)
                 _tmp.destroy()
             except Exception:
-                pass
-
-
-if __name__ == "__main__":
-    main()
+                print(msg, file=sys.stderr)
+        else:
+            main()
+    else:
+        main()
 
 
