@@ -489,20 +489,20 @@ class FlowBrowserTool:
         # Move action buttons up to fill space of hidden inputs
         action_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         
-        # Evenly distribute buttons on one row with equal widths
-        for i in range(4):
+        # Arrange buttons in 2 rows x 2 columns for more space
+        for i in range(2):
             try:
                 action_frame.columnconfigure(i, weight=1)
             except Exception:
                 pass
         btn_import = ttk.Button(action_frame, text="📥 Import Excel", command=self._import_excel_and_dispatch, style='Secondary.TButton')
-        btn_import.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=6)
+        btn_import.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=6, pady=(0, 8))
         btn_tpl = ttk.Button(action_frame, text="⬇️ Tải Template", command=self._download_excel_template, style='Secondary.TButton')
-        btn_tpl.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=6)
+        btn_tpl.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=6, pady=(0, 8))
         btn_exec = ttk.Button(action_frame, text="▶️ Execute", command=self._execute_workflow, style='Accent.TButton')
-        btn_exec.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=6)
+        btn_exec.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=6)
         btn_stop = ttk.Button(action_frame, text="⏹️ Stop", command=self._stop_execution, style='Secondary.TButton')
-        btn_stop.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=6)
+        btn_stop.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=6)
         # Attach tooltips
         self._attach_tooltip(btn_exec, "Thực thi theo cấu hình và dữ liệu nhập")
         self._attach_tooltip(btn_stop, "Dừng quá trình đang chạy")
