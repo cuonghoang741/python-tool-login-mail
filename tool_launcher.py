@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import sys
+import traceback
 
 # Optional modern theming with ttkbootstrap
 try:
@@ -24,25 +26,19 @@ def _launch_gmail():
     gmail.main()
 
 
-def _run_and_close(root: tk.Tk, launcher: callable) -> None:
-    # Hide launcher to avoid destroying Tk context too early
+_selected_launcher = None
+
+
+def _select_and_quit(root: tk.Tk, launcher: callable) -> None:
+    global _selected_launcher
+    _selected_launcher = launcher
     try:
-        root.withdraw()
+        root.after(10, root.quit)
     except Exception:
-        pass
-    # Start selected tool shortly after, then close launcher once it returns
-    def _start():
         try:
-            launcher()
-        finally:
-            try:
-                root.destroy()
-            except Exception:
-                pass
-    try:
-        root.after(50, _start)
-    except Exception:
-        _start()
+            root.quit()
+        except Exception:
+            pass
 
 
 def main() -> None:
@@ -76,7 +72,7 @@ def main() -> None:
     btn_flow = ttk.Button(
         container,
         text="🎬 Veo3",
-        command=lambda: _run_and_close(root, _launch_flow),
+        command=lambda: _select_and_quit(root, _launch_flow),
         width=24
     )
     btn_flow.grid(row=1, column=0, padx=8, pady=8, sticky=(tk.W, tk.E))
@@ -116,6 +112,25 @@ def main() -> None:
         container.columnconfigure(i, weight=1)
 
     root.mainloop()
+
+    # After the launcher window is closed, run the selected tool
+    global _selected_launcher
+    if _selected_launcher is not None:
+        try:
+            _selected_launcher()
+        except Exception as e:
+            # Try to show a minimal error dialog so the user isn't left with a black screen
+            try:
+                _tmp = tk.Tk()
+                _tmp.withdraw()
+                messagebox.showerror(
+                    "Tool error",
+                    f"Đã xảy ra lỗi khi chạy tool:\n{e}\n\n" +
+                    ("\n".join(traceback.format_exc().splitlines()[-6:]))
+                )
+                _tmp.destroy()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
