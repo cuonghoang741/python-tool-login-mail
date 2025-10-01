@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import os
+from functools import partial
 import re
 import json
 import time
@@ -22,40 +23,29 @@ from webdriver_manager.chrome import ChromeDriverManager
 from openpyxl import load_workbook
 
 
+# Optional modern theming with ttkbootstrap (for a significantly improved look)
+try:
+    from ttkbootstrap import Style as TtkbStyle
+    from ttkbootstrap import Window as TtkbWindow
+    _HAS_TTKBOOTSTRAP = True
+except Exception:
+    TtkbStyle = None
+    TtkbWindow = None
+    _HAS_TTKBOOTSTRAP = False
+
 class FlowBrowserTool:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk | None, use_tk_ui: bool = True, ui_callbacks: dict | None = None):
         self.root = root
+        self.use_tk_ui = use_tk_ui
+        # Optional callbacks for non-Tk UI adapters (PySide6)
+        # ui_callbacks keys: on_log(str), on_status(text,color), on_exec_status(text,color), on_jobs_update()
+        self.ui_callbacks = ui_callbacks or {}
         self.root.title("🎬 Google Flow Tool")
         self.root.geometry("900x650")
         self.root.resizable(True, True)
         
-        # Configure modern style
-        self.style = ttk.Style()
-        self.style.theme_use('clam')
-        
-        # Configure colors and fonts
-        self.style.configure('Title.TLabel', font=('Segoe UI', 16, 'bold'), foreground='#2E86AB')
-        self.style.configure('Subtitle.TLabel', font=('Segoe UI', 10, 'bold'), foreground='#34495E')
-        self.style.configure('Success.TLabel', foreground='#27AE60', font=('Segoe UI', 9))
-        self.style.configure('Error.TLabel', foreground='#E74C3C', font=('Segoe UI', 9))
-        self.style.configure('Info.TLabel', foreground='#3498DB', font=('Segoe UI', 9))
-        self.style.configure('Warning.TLabel', foreground='#F39C12', font=('Segoe UI', 9))
-        
-        # Configure button styles
-        self.style.configure('Primary.TButton', font=('Segoe UI', 9, 'bold'), padding=(10, 6))
-        self.style.configure('Secondary.TButton', font=('Segoe UI', 9), padding=(8, 4))
-        self.style.configure('Accent.TButton', font=('Segoe UI', 10, 'bold'), padding=(14, 8))
-        
-        # Configure frame styles
-        self.style.configure('Card.TFrame', relief='raised', borderwidth=1)
-        self.style.configure('Card.TLabelFrame', relief='raised', borderwidth=1)
-        
-        # Configure notebook style
-        self.style.configure('TNotebook.Tab', padding=[14, 8], font=('Segoe UI', 10, 'bold'))
-        self.style.configure('TNotebook', tabmargins=[2, 5, 2, 0])
-        
-        # Set background color
-        self.root.configure(bg='#F8F9FA')
+        # Apply luxury theme
+        self._apply_luxury_theme()
 
         # Runtime state
         self.driver = None
@@ -90,7 +80,192 @@ class FlowBrowserTool:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
         ]
 
-        self._build_ui()
+        if self.use_tk_ui:
+            self._build_ui()
+
+    def _apply_luxury_theme(self) -> None:
+        """Apply a modern, luxurious ttk theme across widgets."""
+        # Color palette (deep slate with gold accents)
+        self.colors = {
+            'bg': '#0F1115',
+            'surface': '#171A21',
+            'border': '#2A2F3A',
+            'text': '#EAECEF',
+            'subtle': '#9AA4AF',
+            'accent': '#D4AF37',  # gold
+            'accent_hover': '#B8902E',
+            'success': '#2ECC71',
+            'warning': '#F1C40F',
+            'error': '#E74C3C',
+            'info': '#58A6FF',
+        }
+        # Prefer ttkbootstrap themes if available for a modern look
+        if _HAS_TTKBOOTSTRAP and TtkbStyle is not None:
+            self.style = TtkbStyle(theme='superhero')
+        else:
+            self.style = ttk.Style()
+            self.style.theme_use('clam')
+        # Window background
+        self.root.configure(bg=self.colors['bg'])
+        
+        # Base backgrounds
+        for element in ('TFrame', 'TLabelframe', 'TLabelframe.Label'):
+            self.style.configure(element, background=self.colors['bg'], foreground=self.colors['text'])
+        self.style.configure('Card.TFrame', background=self.colors['surface'], bordercolor=self.colors['border'], borderwidth=1, relief='ridge')
+        self.style.configure('CardInner.TFrame', background='#141923')
+        self.style.configure('CardHover.TFrame', background='#1B2330', bordercolor=self.colors['border'], borderwidth=1, relief='ridge')
+        self.style.configure('Card.TLabelframe', background=self.colors['surface'], bordercolor=self.colors['border'], borderwidth=1, relief='ridge')
+        
+        # Labels
+        self.style.configure('TLabel', background=self.colors['bg'], foreground=self.colors['text'], font=('Segoe UI', 10))
+        self.style.configure('Title.TLabel', background=self.colors['bg'], foreground=self.colors['accent'], font=('Segoe UI Semibold', 18))
+        self.style.configure('Subtitle.TLabel', background=self.colors['bg'], foreground=self.colors['subtle'], font=('Segoe UI', 10, 'bold'))
+        self.style.configure('Success.TLabel', background=self.colors['bg'], foreground=self.colors['success'], font=('Segoe UI', 10))
+        self.style.configure('Error.TLabel', background=self.colors['bg'], foreground=self.colors['error'], font=('Segoe UI', 10))
+        self.style.configure('Info.TLabel', background=self.colors['bg'], foreground=self.colors['info'], font=('Segoe UI', 10))
+        self.style.configure('Warning.TLabel', background=self.colors['bg'], foreground=self.colors['warning'], font=('Segoe UI', 10))
+        
+        # Buttons
+        base_button_opts = {
+            'font': ('Segoe UI', 10),
+            'borderwidth': 0,
+        }
+        self.style.configure('TButton', **base_button_opts, padding=(12, 8), background=self.colors['surface'], foreground=self.colors['text'])
+        self.style.map('TButton', background=[('active', '#1E2530')])
+        self.style.configure('Primary.TButton', **base_button_opts, padding=(12, 8), background=self.colors['accent'], foreground='#0B0C10')
+        self.style.map('Primary.TButton', background=[('active', self.colors['accent_hover'])], foreground=[('active', '#000000')])
+        self.style.configure('Secondary.TButton', **base_button_opts, padding=(12, 8), background='#1A1F27', foreground=self.colors['text'])
+        self.style.map('Secondary.TButton', background=[('active', '#222938')], foreground=[('active', self.colors['text'])])
+        self.style.configure('Accent.TButton', **base_button_opts, padding=(16, 10), background=self.colors['accent'], foreground='#0B0C10')
+        self.style.map('Accent.TButton', background=[('active', self.colors['accent_hover'])], foreground=[('active', '#000000')])
+        
+        # Inputs: Entry / Combobox / Checkbutton / Radiobutton
+        entry_like = {
+            'fieldbackground': '#1B222C',
+            'foreground': self.colors['text'],
+            'background': self.colors['bg'],
+            'bordercolor': self.colors['border'],
+            'lightcolor': self.colors['border'],
+            'darkcolor': self.colors['border'],
+            'padding': (8, 6),
+        }
+        self.style.configure('TEntry', **entry_like)
+        self.style.configure('TCombobox', **entry_like)
+        self.style.map('TCombobox', fieldbackground=[('readonly', '#1B222C')], background=[('readonly', '#1B222C')])
+        self.style.configure('TCheckbutton', background=self.colors['bg'], foreground=self.colors['text'])
+        self.style.configure('TRadiobutton', background=self.colors['bg'], foreground=self.colors['text'])
+        
+        # Notebook
+        self.style.configure('TNotebook', background=self.colors['bg'], borderwidth=0, tabmargins=[4, 6, 4, 0])
+        self.style.configure('TNotebook.Tab', background='#1A1F27', foreground=self.colors['text'], padding=[16, 10], font=('Segoe UI', 10, 'bold'))
+        self.style.map('TNotebook.Tab', background=[('selected', self.colors['surface']), ('active', '#1E2530')])
+        
+        # Treeview
+        self.style.configure('Treeview', background=self.colors['surface'], foreground=self.colors['text'], fieldbackground=self.colors['surface'], rowheight=26, bordercolor=self.colors['border'], borderwidth=1)
+        self.style.configure('Treeview.Heading', background='#1A1F27', foreground=self.colors['subtle'], font=('Segoe UI', 10, 'bold'))
+        self.style.map('Treeview', background=[('selected', '#253044')], foreground=[('selected', self.colors['text'])])
+        
+        # Scrollbar
+        self.style.configure('Vertical.TScrollbar', background='#1A1F27', troughcolor=self.colors['bg'], bordercolor=self.colors['bg'])
+        self.style.configure('Horizontal.TScrollbar', background='#1A1F27', troughcolor=self.colors['bg'], bordercolor=self.colors['bg'])
+
+        # Badges
+        self.style.configure('Badge.Running.TLabel', background='#20314A', foreground=self.colors['info'], padding=(6, 2))
+        self.style.configure('Badge.Queued.TLabel', background='#2B2B1A', foreground=self.colors['warning'], padding=(6, 2))
+        self.style.configure('Badge.Success.TLabel', background='#153724', foreground=self.colors['success'], padding=(6, 2))
+        self.style.configure('Badge.Error.TLabel', background='#3A1B1B', foreground=self.colors['error'], padding=(6, 2))
+
+    def _create_rounded_card(self, parent: tk.Widget, padding: int = 10) -> tuple[tk.Canvas, int, ttk.Frame]:
+        """Create a rounded-corner card using a Canvas and return (canvas, shape_id, content_frame)."""
+        try:
+            radius = 12
+            canvas = tk.Canvas(parent, bd=0, highlightthickness=0, bg=self.colors['surface'])
+            # Placeholder size; will expand to parent width
+            width = max(parent.winfo_width(), 280)
+            height = 10 + padding * 2
+            x1, y1, x2, y2 = 4, 4, width - 4, height
+
+            def rounded_rect_path(x1, y1, x2, y2, r):
+                return [
+                    x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2,
+                    x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1
+                ]
+
+            pts = rounded_rect_path(x1, y1, x2, y2, radius)
+            shape = canvas.create_polygon(
+                pts, smooth=True, splinesteps=36,
+                fill=self.colors['surface'], outline=self.colors['border']
+            )
+
+            content = ttk.Frame(canvas)
+            window_id = canvas.create_window(12, 12, anchor='nw', window=content)
+
+            # Resize behavior to fit parent width
+            def _resize(_e=None):
+                try:
+                    w = parent.winfo_width() - 8
+                    if w < 260:
+                        w = 260
+                    # Estimate height from content
+                    content.update_idletasks()
+                    h = content.winfo_reqheight() + 24
+                    canvas.configure(width=w, height=h)
+                    # Recompute rounded rect points
+                    x1n, y1n, x2n, y2n = 4, 4, w - 4, h - 4
+                    new_pts = rounded_rect_path(x1n, y1n, x2n, y2n, radius)
+                    canvas.coords(shape, *new_pts)
+                    canvas.itemconfigure(window_id)
+                except Exception:
+                    pass
+
+            try:
+                parent.bind('<Configure>', _resize)
+            except Exception:
+                pass
+            # Initial size
+            _resize()
+            return canvas, shape, content
+        except Exception:
+            # Fallback to simple frame if anything fails
+            fallback = ttk.Frame(parent, style='Card.TFrame', padding=padding)
+            return fallback, -1, fallback
+
+    # ===================== UX Helpers =====================
+    def _attach_tooltip(self, widget: tk.Widget, text: str) -> None:
+        """Attach a simple tooltip to a widget."""
+        try:
+            tip = {'win': None}
+
+            def show_tip(_e=None):
+                try:
+                    if tip['win'] is not None:
+                        return
+                    x = widget.winfo_rootx() + 12
+                    y = widget.winfo_rooty() + widget.winfo_height() + 8
+                    win = tk.Toplevel(widget)
+                    win.wm_overrideredirect(True)
+                    win.configure(bg=self.colors['border'])
+                    frame = tk.Frame(win, bg=self.colors['surface'], bd=0, highlightthickness=1, highlightbackground=self.colors['border'])
+                    frame.pack()
+                    lbl = tk.Label(frame, text=text, bg=self.colors['surface'], fg=self.colors['text'], font=('Segoe UI', 9), padx=8, pady=4)
+                    lbl.pack()
+                    win.wm_geometry(f"+{x}+{y}")
+                    tip['win'] = win
+                except Exception:
+                    pass
+
+            def hide_tip(_e=None):
+                try:
+                    if tip['win'] is not None:
+                        tip['win'].destroy()
+                        tip['win'] = None
+                except Exception:
+                    pass
+
+            widget.bind('<Enter>', show_tip)
+            widget.bind('<Leave>', hide_tip)
+        except Exception:
+            pass
 
     # ===================== UI =====================
     def _build_ui(self) -> None:
@@ -124,6 +299,7 @@ class FlowBrowserTool:
 
         method_group = ttk.LabelFrame(frame, text="🔑 Phương thức đăng nhập", padding="15")
         method_group.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        method_group.configure(style='Card.TLabelframe')
         self.login_method = tk.StringVar(value="password")
         # Chỉ giữ password login, ẩn nhóm chọn phương thức
         try:
@@ -133,6 +309,7 @@ class FlowBrowserTool:
 
         creds = ttk.LabelFrame(frame, text="📝 Thông tin tài khoản", padding="15")
         creds.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        creds.configure(style='Card.TLabelframe')
         creds.columnconfigure(1, weight=1)
 
         ttk.Label(creds, text="📧 Email:", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
@@ -159,10 +336,14 @@ class FlowBrowserTool:
 
         profiles_group = ttk.LabelFrame(frame, text="👥 Tài khoản đã đăng nhập (cache)", padding="15")
         profiles_group.grid(row=6, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E))
+        profiles_group.configure(style='Card.TLabelframe')
         profiles_group.columnconfigure(0, weight=1)
         profiles_group.rowconfigure(0, weight=1)
 
-        self.profiles_list = tk.Listbox(profiles_group, height=6, selectmode=tk.SINGLE)
+        self.profiles_list = tk.Listbox(profiles_group, height=6, selectmode=tk.SINGLE,
+                                        bg=self.colors['surface'], fg=self.colors['text'],
+                                        highlightthickness=1, highlightbackground=self.colors['border'],
+                                        selectbackground='#253044', selectforeground=self.colors['text'])
         self.profiles_list.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         sb = ttk.Scrollbar(profiles_group, orient=tk.VERTICAL, command=self.profiles_list.yview)
         sb.grid(row=0, column=1, sticky=(tk.N, tk.S))
@@ -184,7 +365,7 @@ class FlowBrowserTool:
         ex_container.columnconfigure(0, weight=1)
         ex_container.rowconfigure(0, weight=1)
 
-        ex_canvas = tk.Canvas(ex_container, highlightthickness=0)
+        ex_canvas = tk.Canvas(ex_container, highlightthickness=0, bg=self.colors['bg'], bd=0)
         ex_vscroll = ttk.Scrollbar(ex_container, orient=tk.VERTICAL, command=ex_canvas.yview)
         ex_canvas.configure(yscrollcommand=ex_vscroll.set)
         ex_canvas.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
@@ -220,16 +401,20 @@ class FlowBrowserTool:
             except Exception:
                 pass
         _bind_mousewheel(ex_canvas)
-        for i in range(3):
-            ex.columnconfigure(i, weight=1)
+        # Give more space to left (cols 0-1) and slightly less to right panel (col 2)
+        ex.columnconfigure(0, weight=3)
+        ex.columnconfigure(1, weight=3)
+        ex.columnconfigure(2, weight=2)
         ex.rowconfigure(2, weight=1)  # Prompt text area expandable
 
         exec_title = ttk.Label(ex, text="🎥 Execute Media Workflow", style='Title.TLabel')
-        exec_title.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        # Constrain title to left content area (columns 0-1) so right panel can start at row 0 col 2
+        exec_title.grid(row=0, column=0, columnspan=2, pady=(0, 20))
 
         # Email selection
         email_frame = ttk.LabelFrame(ex, text="👤 Chọn tài khoản", padding="15")
-        email_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        email_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        email_frame.configure(style='Card.TLabelframe')
         email_frame.columnconfigure(1, weight=1)
 
         ttk.Label(email_frame, text="📧 Email:", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
@@ -237,10 +422,16 @@ class FlowBrowserTool:
         self.exec_email_combo = ttk.Combobox(email_frame, textvariable=self.exec_email, state="readonly")
         self.exec_email_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(10, 8), pady=(0, 8))
         ttk.Button(email_frame, text="🔄 Làm mới", command=self._refresh_exec_emails, style='Secondary.TButton').grid(row=0, column=2, pady=(0, 8))
+        # Hide email input section in Execute task
+        try:
+            email_frame.grid_remove()
+        except Exception:
+            pass
 
         # Workflow selection
         workflow_frame = ttk.LabelFrame(ex, text="⚙️ Loại Workflow", padding="15")
-        workflow_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        workflow_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        workflow_frame.configure(style='Card.TLabelframe')
         workflow_frame.columnconfigure(0, weight=1)
         workflow_frame.columnconfigure(1, weight=1)
 
@@ -248,19 +439,31 @@ class FlowBrowserTool:
         self.workflow = tk.StringVar(value="frames_to_video")
         ttk.Radiobutton(workflow_frame, text="📝 Text to Video", variable=self.workflow, value="text_to_video").grid(row=1, column=0, sticky=tk.W, pady=5)
         ttk.Radiobutton(workflow_frame, text="🖼️ Frames to Video", variable=self.workflow, value="frames_to_video").grid(row=1, column=1, sticky=tk.W, pady=5)
+        # Hide workflow selection in Execute task
+        try:
+            workflow_frame.grid_remove()
+        except Exception:
+            pass
 
         # Prompt section
         prompt_frame = ttk.LabelFrame(ex, text="💬 Prompt (Text to Video)", padding="15")
-        prompt_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        prompt_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        prompt_frame.configure(style='Card.TLabelframe')
         prompt_frame.columnconfigure(0, weight=1)
 
         ttk.Label(prompt_frame, text="Prompt (Text to Video):", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.NW, pady=(0, 8))
-        self.prompt_text = scrolledtext.ScrolledText(prompt_frame, height=6, wrap=tk.WORD)
+        self.prompt_text = scrolledtext.ScrolledText(prompt_frame, height=6, wrap=tk.WORD, bg='#1B222C', fg=self.colors['text'], insertbackground=self.colors['text'], highlightthickness=1, highlightbackground=self.colors['border'])
         self.prompt_text.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        # Hide prompt input in Execute task
+        try:
+            prompt_frame.grid_remove()
+        except Exception:
+            pass
 
         # Media upload section
         media_frame = ttk.LabelFrame(ex, text="📁 Upload Media (Frames to Video)", padding="15")
-        media_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        media_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        media_frame.configure(style='Card.TLabelframe')
 
         ttk.Label(media_frame, text="Upload media (chỉ 1 file ảnh):", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
         media_input_frame = ttk.Frame(media_frame)
@@ -271,10 +474,16 @@ class FlowBrowserTool:
         self.media_entry = ttk.Entry(media_input_frame, textvariable=self.media_paths)
         self.media_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
         ttk.Button(media_input_frame, text="🖼️ Chọn ảnh", command=self._choose_image_file, style='Secondary.TButton').grid(row=0, column=1)
+        # Hide media upload in Execute task
+        try:
+            media_frame.grid_remove()
+        except Exception:
+            pass
 
         # Configuration section
         cfg = ttk.LabelFrame(ex, text="⚙️ Cấu hình", padding="15")
-        cfg.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        cfg.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        cfg.configure(style='Card.TLabelframe')
         for i in range(6):
             cfg.columnconfigure(i, weight=1)
 
@@ -308,57 +517,101 @@ class FlowBrowserTool:
         )
         self.model_choice.set("Veo 3 - Fast")
         self.model_choice.grid(row=1, column=5, sticky=(tk.W, tk.E), pady=(8, 0))
+        # Hide configuration section in Execute task
+        try:
+            cfg.grid_remove()
+        except Exception:
+            pass
 
         # Action buttons
         action_frame = ttk.Frame(ex)
-        action_frame.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        # Move action buttons up to fill space of hidden inputs
+        action_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         
-        ttk.Button(action_frame, text="⏹️ Stop", command=self._stop_execution, style='Secondary.TButton').pack(side=tk.RIGHT, padx=(0, 10))
-        ttk.Button(action_frame, text="▶️ Execute", command=self._execute_workflow, style='Accent.TButton').pack(side=tk.RIGHT)
-        ttk.Button(action_frame, text="📥 Import Excel", command=self._import_excel_and_dispatch, style='Secondary.TButton').pack(side=tk.LEFT)
-        ttk.Button(action_frame, text="⬇️ Tải Template", command=self._download_excel_template, style='Secondary.TButton').pack(side=tk.LEFT, padx=(10, 0))
+        # Evenly distribute buttons on one row with equal widths
+        for i in range(4):
+            try:
+                action_frame.columnconfigure(i, weight=1)
+            except Exception:
+                pass
+        btn_import = ttk.Button(action_frame, text="📥 Import Excel", command=self._import_excel_and_dispatch, style='Secondary.TButton')
+        btn_import.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=6)
+        btn_tpl = ttk.Button(action_frame, text="⬇️ Tải Template", command=self._download_excel_template, style='Secondary.TButton')
+        btn_tpl.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=6)
+        btn_exec = ttk.Button(action_frame, text="▶️ Execute", command=self._execute_workflow, style='Accent.TButton')
+        btn_exec.grid(row=0, column=2, sticky=(tk.W, tk.E), padx=6)
+        btn_stop = ttk.Button(action_frame, text="⏹️ Stop", command=self._stop_execution, style='Secondary.TButton')
+        btn_stop.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=6)
+        # Attach tooltips
+        self._attach_tooltip(btn_exec, "Thực thi theo cấu hình và dữ liệu nhập")
+        self._attach_tooltip(btn_stop, "Dừng quá trình đang chạy")
+        self._attach_tooltip(btn_import, "Import Excel và đưa vào hàng đợi")
+        self._attach_tooltip(btn_tpl, "Tải file template Excel")
 
         self.exec_status = ttk.Label(ex, text="✅ Sẵn sàng", style='Success.TLabel')
-        self.exec_status.grid(row=7, column=0, columnspan=3, sticky=tk.W)
+        # Place status just below actions
+        self.exec_status.grid(row=2, column=0, columnspan=2, sticky=tk.W)
 
-        # Jobs view (running + queue)
-        jobs_frame = ttk.LabelFrame(ex, text="📋 Tiến trình", padding="10")
-        jobs_frame.grid(row=8, column=0, columnspan=3, sticky=(tk.W, tk.E))
-        jobs_frame.columnconfigure(0, weight=1)
-        jobs_frame.columnconfigure(1, weight=1)
+        # Jobs view (right side panel with cards)
+        jobs_side = ttk.LabelFrame(ex, text="📋 Tiến trình", padding="10")
+        # Start right-side panel from top row to align with title
+        jobs_side.grid(row=0, column=2, rowspan=4, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(15, 0))
+        jobs_side.configure(style='Card.TLabelframe')
+        jobs_side.columnconfigure(0, weight=1)
+        jobs_side.rowconfigure(1, weight=1)
 
-        ttk.Label(jobs_frame, text="Đang chạy", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(jobs_frame, text="Đang đợi", style='Subtitle.TLabel').grid(row=0, column=1, sticky=tk.W)
+        header_running = ttk.Frame(jobs_side)
+        header_running.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 6))
+        header_running.columnconfigure(0, weight=1)
+        ttk.Label(header_running, text="Đang chạy", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(header_running, text="RUNNING", style='Badge.Running.TLabel').grid(row=0, column=1, sticky=tk.E)
+        # Running cards (scrollable)
+        run_canvas = tk.Canvas(jobs_side, highlightthickness=0, bg=self.colors['surface'], bd=0)
+        run_scroll = ttk.Scrollbar(jobs_side, orient=tk.VERTICAL, command=run_canvas.yview)
+        run_canvas.configure(yscrollcommand=run_scroll.set)
+        run_canvas.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        run_scroll.grid(row=1, column=1, sticky=(tk.N, tk.S))
+        self.running_cards = ttk.Frame(run_canvas, padding=4, style='Card.TFrame')
+        self.running_cards_id = run_canvas.create_window((0, 0), window=self.running_cards, anchor="nw")
 
-        # Running table
-        run_cols = ("Email", "Workflow", "Image", "Prompt")
-        self.running_tree = ttk.Treeview(jobs_frame, columns=run_cols, show='headings', height=2)
-        for c, w in zip(run_cols, (180, 120, 160, 360)):
-            self.running_tree.heading(c, text=c)
-            self.running_tree.column(c, width=w, anchor=tk.W)
-        self.running_tree.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
-        run_scroll_x = ttk.Scrollbar(jobs_frame, orient=tk.HORIZONTAL, command=self.running_tree.xview)
-        self.running_tree.configure(xscrollcommand=run_scroll_x.set)
-        run_scroll_x.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
+        header_queue = ttk.Frame(jobs_side)
+        header_queue.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 6))
+        header_queue.columnconfigure(0, weight=1)
+        ttk.Label(header_queue, text="Đang đợi", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(header_queue, text="QUEUE", style='Badge.Queued.TLabel').grid(row=0, column=1, sticky=tk.E)
+        # Queue cards (scrollable)
+        queue_canvas = tk.Canvas(jobs_side, highlightthickness=0, bg=self.colors['surface'], bd=0)
+        queue_scroll = ttk.Scrollbar(jobs_side, orient=tk.VERTICAL, command=queue_canvas.yview)
+        queue_canvas.configure(yscrollcommand=queue_scroll.set)
+        queue_canvas.grid(row=3, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        queue_scroll.grid(row=3, column=1, sticky=(tk.N, tk.S))
+        self.queue_cards = ttk.Frame(queue_canvas, padding=4, style='Card.TFrame')
+        self.queue_cards_id = queue_canvas.create_window((0, 0), window=self.queue_cards, anchor="nw")
 
-        # Queue table
-        self.queue_tree = ttk.Treeview(jobs_frame, columns=run_cols, show='headings', height=4)
-        for c, w in zip(run_cols, (180, 120, 160, 360)):
-            self.queue_tree.heading(c, text=c)
-            self.queue_tree.column(c, width=w, anchor=tk.W)
-        self.queue_tree.grid(row=1, column=1, sticky=(tk.W, tk.E))
-        queue_scroll_x = ttk.Scrollbar(jobs_frame, orient=tk.HORIZONTAL, command=self.queue_tree.xview)
-        self.queue_tree.configure(xscrollcommand=queue_scroll_x.set)
-        queue_scroll_x.grid(row=2, column=1, sticky=(tk.W, tk.E))
+        # Update scrollregion on size changes
+        def _bind_configure(canvas: tk.Canvas, inner: ttk.Frame):
+            def on_configure(event):
+                bbox = canvas.bbox("all")
+                if bbox is not None:
+                    canvas.configure(scrollregion=bbox)
+                canvas.itemconfigure(self.running_cards_id if inner is self.running_cards else self.queue_cards_id, width=canvas.winfo_width())
+            inner.bind('<Configure>', on_configure)
+        _bind_configure(run_canvas, self.running_cards)
+        _bind_configure(queue_canvas, self.queue_cards)
 
         # Progress log card
         log_frame = ttk.LabelFrame(ex, text="📜 Log tiến trình", padding="10")
-        log_frame.grid(row=9, column=0, columnspan=3, sticky=(tk.N, tk.S, tk.W, tk.E))
+        # Move log up under status
+        log_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
-        self.exec_log = scrolledtext.ScrolledText(log_frame, height=8, wrap=tk.WORD, state='disabled')
+        self.exec_log = scrolledtext.ScrolledText(log_frame, height=8, wrap=tk.WORD, state='disabled',
+                                                  bg='#10141B', fg=self.colors['text'],
+                                                  insertbackground=self.colors['text'],
+                                                  highlightthickness=1, highlightbackground=self.colors['border'])
         self.exec_log.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-        ex.rowconfigure(9, weight=1)
+        # Make the log row expandable now that inputs are hidden
+        ex.rowconfigure(3, weight=1)
 
         self._refresh_exec_emails()
         # Initialize jobs view
@@ -1031,28 +1284,121 @@ class FlowBrowserTool:
                     prompt = prompt[:117] + '...'
                 return (job.get('email') or '', job.get('wf') or '', img, prompt)
 
-            # Running table (show the most recently updated running job)
-            if hasattr(self, 'running_tree'):
-                for i in self.running_tree.get_children():
-                    self.running_tree.delete(i)
+            # Running cards
+            if hasattr(self, 'running_cards'):
+                for child in list(self.running_cards.winfo_children()):
+                    child.destroy()
                 try:
                     if self.exec_current_jobs:
-                        any_job = list(self.exec_current_jobs.values())[-1]
-                        self.running_tree.insert('', tk.END, values=fmt_row(any_job))
+                        jobs = list(self.exec_current_jobs.values())[::-1]
+                        for job in jobs:
+                            email, wf, img, prompt = fmt_row(job)
+                            card_canvas, shape, top = self._create_rounded_card(self.running_cards, padding=10)
+                            card_canvas.pack(fill='x', pady=8)
+                            # Hover effect by changing outline color
+                            def on_enter(_e, s=shape, c=card_canvas):
+                                try:
+                                    c.itemconfigure(s, outline=self.colors['accent'])
+                                except Exception:
+                                    pass
+                            def on_leave(_e, s=shape, c=card_canvas):
+                                try:
+                                    c.itemconfigure(s, outline=self.colors['border'])
+                                except Exception:
+                                    pass
+                            try:
+                                card_canvas.bind('<Enter>', on_enter)
+                                card_canvas.bind('<Leave>', on_leave)
+                            except Exception:
+                                pass
+                            header = ttk.Frame(top)
+                            header.pack(fill='x', pady=(0, 6))
+                            header.columnconfigure(0, weight=1)
+                            ttk.Label(header, text=f"{email}", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
+                            ttk.Label(header, text="RUNNING", style='Badge.Running.TLabel').grid(row=0, column=1, sticky=tk.E)
+                            ttk.Label(top, text=f"Workflow: {wf}").pack(anchor='w')
+                            if img:
+                                ttk.Label(top, text=f"Image: {img}", foreground=self.colors['subtle']).pack(anchor='w')
+                            if prompt:
+                                ttk.Label(top, text=f"Prompt: {prompt}", foreground=self.colors['subtle'], wraplength=260, justify='left').pack(anchor='w')
+                            # Progress bar
+                            try:
+                                pb = ttk.Progressbar(top, mode='indeterminate', length=200)
+                                pb.pack(fill='x', pady=(8, 0))
+                                pb.start(20)
+                            except Exception:
+                                pass
+                            # Actions
+                            actions = ttk.Frame(top)
+                            actions.pack(fill='x', pady=(8, 0))
+                            ttk.Button(actions, text="⏹️ Stop", style='Secondary.TButton', command=self._stop_execution).pack(side=tk.RIGHT)
+                            try:
+                                sep = ttk.Separator(self.running_cards, orient=tk.HORIZONTAL)
+                                sep.pack(fill='x', pady=(10, 0))
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
-            # Queue table: aggregate across accounts
-            if hasattr(self, 'queue_tree'):
-                for i in self.queue_tree.get_children():
-                    self.queue_tree.delete(i)
+            # Queue cards
+            if hasattr(self, 'queue_cards'):
+                for child in list(self.queue_cards.winfo_children()):
+                    child.destroy()
                 try:
                     aggregate = []
                     for _, st in self.account_states.items():
                         with st['lock']:
                             aggregate.extend(list(st['queue']))
-                    for j in aggregate:
-                        self.queue_tree.insert('', tk.END, values=fmt_row(j))
+                    for job in aggregate:
+                        email, wf, img, prompt = fmt_row(job)
+                        card_canvas, shape, top = self._create_rounded_card(self.queue_cards, padding=10)
+                        card_canvas.pack(fill='x', pady=8)
+                        def on_enter(_e, s=shape, c=card_canvas):
+                            try:
+                                c.itemconfigure(s, outline=self.colors['accent'])
+                            except Exception:
+                                pass
+                        def on_leave(_e, s=shape, c=card_canvas):
+                            try:
+                                c.itemconfigure(s, outline=self.colors['border'])
+                            except Exception:
+                                pass
+                        try:
+                            card_canvas.bind('<Enter>', on_enter)
+                            card_canvas.bind('<Leave>', on_leave)
+                        except Exception:
+                            pass
+                        header = ttk.Frame(top)
+                        header.pack(fill='x', pady=(0, 6))
+                        header.columnconfigure(0, weight=1)
+                        ttk.Label(header, text=f"{email}", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
+                        ttk.Label(header, text="QUEUED", style='Badge.Queued.TLabel').grid(row=0, column=1, sticky=tk.E)
+                        ttk.Label(top, text=f"Workflow: {wf}").pack(anchor='w')
+                        if img:
+                            ttk.Label(top, text=f"Image: {img}", foreground=self.colors['subtle']).pack(anchor='w')
+                        if prompt:
+                            ttk.Label(top, text=f"Prompt: {prompt}", foreground=self.colors['subtle'], wraplength=260, justify='left').pack(anchor='w')
+                        # Actions
+                        def _remove_from_queue(email=email, wf=wf, img=img, prompt=prompt):
+                            try:
+                                st = self.account_states.get(email)
+                                if not st:
+                                    return
+                                with st['lock']:
+                                    st['queue'] = [q for q in st['queue'] if not (
+                                        (q.get('wf') or '') == wf and (os.path.basename(q.get('media') or '') == img) and (q.get('prompt') or '').replace('\n',' ').strip() == (prompt or '').replace('\n',' ').strip()
+                                    )]
+                                self._refresh_jobs_view()
+                            except Exception:
+                                pass
+                        actions = ttk.Frame(top)
+                        actions.pack(fill='x', pady=(8, 0))
+                        ttk.Button(actions, text="🗑️ Remove", style='Secondary.TButton', command=_remove_from_queue).pack(side=tk.RIGHT)
+                        try:
+                            sep = ttk.Separator(self.queue_cards, orient=tk.HORIZONTAL)
+                            sep.pack(fill='x', pady=(10, 0))
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         except Exception:
@@ -1564,20 +1910,44 @@ class FlowBrowserTool:
                 continue
 
     def _log_exec(self, message: str, success: bool = False, error: bool = False) -> None:
-        """Print to console, update status label, and append to on-screen log."""
+        """Print to console, update status label, and append to on-screen log. Supports UI callbacks."""
         prefix = "[EXEC]"
-        print(f"{prefix} {message}")
-        # Append to UI log
+        line = f"{prefix} {time.strftime('%H:%M:%S')} | {message}\n"
+        print(line, end="")
+        # Callback-based logging (for PySide6 adapter)
         try:
-            self._append_exec_log(f"{prefix} {message}\n")
+            cb = self.ui_callbacks.get('on_log') if hasattr(self, 'ui_callbacks') else None
+            if cb:
+                try:
+                    cb(line)
+                except Exception:
+                    pass
         except Exception:
             pass
+        # Tk UI log append
+        try:
+            if getattr(self, 'use_tk_ui', True):
+                self._append_exec_log(line)
+        except Exception:
+            pass
+        # Status update
+        color = "orange"
         if error:
-            self._set_exec_status(message, "red")
+            color = "red"
         elif success:
-            self._set_exec_status(message, "green")
-        else:
-            self._set_exec_status(message, "orange")
+            color = "green"
+        try:
+            # Callback for status line (non-Tk UI)
+            cb_status = self.ui_callbacks.get('on_exec_status') if hasattr(self, 'ui_callbacks') else None
+            if cb_status:
+                try:
+                    cb_status(message, color)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Tk fallback
+        self._set_exec_status(message, color)
 
     def _append_exec_log(self, text: str) -> None:
         """Append text to the progress log textbox and auto-scroll to bottom."""
@@ -2548,36 +2918,54 @@ class FlowBrowserTool:
     # ===================== Status =====================
     def _set_status(self, text: str, color: str) -> None:
         try:
-            # Map colors to styles
-            style_map = {
-                'blue': 'Info.TLabel',
-                'green': 'Success.TLabel', 
-                'red': 'Error.TLabel',
-                'orange': 'Warning.TLabel'
-            }
-            style = style_map.get(color, 'Info.TLabel')
-            self.status_label.config(text=text, style=style)
+            # Callback for non-Tk UI
+            if hasattr(self, 'ui_callbacks') and self.ui_callbacks.get('on_status'):
+                try:
+                    self.ui_callbacks['on_status'](text, color)
+                except Exception:
+                    pass
+            # Tk fallback
+            if getattr(self, 'use_tk_ui', True) and hasattr(self, 'status_label'):
+                style_map = {
+                    'blue': 'Info.TLabel',
+                    'green': 'Success.TLabel', 
+                    'red': 'Error.TLabel',
+                    'orange': 'Warning.TLabel'
+                }
+                style = style_map.get(color, 'Info.TLabel')
+                self.status_label.config(text=text, style=style)
         except Exception:
             pass
 
     def _set_exec_status(self, text: str, color: str) -> None:
         try:
-            # Map colors to styles
-            style_map = {
-                'blue': 'Info.TLabel',
-                'green': 'Success.TLabel', 
-                'red': 'Error.TLabel',
-                'orange': 'Warning.TLabel'
-            }
-            style = style_map.get(color, 'Info.TLabel')
-            self.exec_status.config(text=text, style=style)
+            # Callback for non-Tk UI
+            if hasattr(self, 'ui_callbacks') and self.ui_callbacks.get('on_exec_status'):
+                try:
+                    self.ui_callbacks['on_exec_status'](text, color)
+                except Exception:
+                    pass
+            # Tk fallback
+            if getattr(self, 'use_tk_ui', True) and hasattr(self, 'exec_status'):
+                style_map = {
+                    'blue': 'Info.TLabel',
+                    'green': 'Success.TLabel', 
+                    'red': 'Error.TLabel',
+                    'orange': 'Warning.TLabel'
+                }
+                style = style_map.get(color, 'Info.TLabel')
+                self.exec_status.config(text=text, style=style)
         except Exception:
             pass
 
 
 def main() -> None:
-    root = tk.Tk()
-    app = FlowBrowserTool(root)
+    # Use ttkbootstrap Window when available for a dramatically nicer default UI
+    if _HAS_TTKBOOTSTRAP and TtkbWindow is not None:
+        root = TtkbWindow(themename='superhero')
+    else:
+        root = tk.Tk()
+    app = FlowBrowserTool(root, use_tk_ui=True)
     # Đảm bảo đóng toàn bộ browser khi thoát ứng dụng
     def _on_app_close():
         try:
