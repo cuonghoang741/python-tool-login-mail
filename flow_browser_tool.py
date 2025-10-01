@@ -357,55 +357,16 @@ class FlowBrowserTool:
         self._refresh_profiles_list()
 
         # ===== Execute Tab (scrollable) =====
-        # Container with canvas + vertical scrollbar
+        # Simple container without custom canvas/scroll to avoid black screen
         exec_tab.columnconfigure(0, weight=1)
         exec_tab.rowconfigure(0, weight=1)
-        ex_container = ttk.Frame(exec_tab)
-        ex_container.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-        ex_container.columnconfigure(0, weight=1)
-        ex_container.rowconfigure(0, weight=1)
-
-        ex_canvas = tk.Canvas(ex_container, highlightthickness=0, bg=self.colors['bg'], bd=0)
-        ex_vscroll = ttk.Scrollbar(ex_container, orient=tk.VERTICAL, command=ex_canvas.yview)
-        ex_canvas.configure(yscrollcommand=ex_vscroll.set)
-        ex_canvas.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-        ex_vscroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
-
-        # Inner frame that holds all actual content
-        ex = ttk.Frame(ex_canvas, padding="20")
-        ex_id = ex_canvas.create_window((0, 0), window=ex, anchor="nw")
-
-        # Update scrollregion when frame size changes
-        def _on_ex_configure(event):
-            try:
-                ex_canvas.configure(scrollregion=ex_canvas.bbox("all"))
-                # Keep inner frame width in sync with canvas width
-                ex_canvas.itemconfigure(ex_id, width=ex_canvas.winfo_width())
-            except Exception:
-                pass
-        ex.bind("<Configure>", _on_ex_configure)
-
-        # Enable mousewheel scrolling over the canvas
-        def _bind_mousewheel(widget):
-            def _on_mousewheel(e):
-                try:
-                    delta = -1 * (e.delta // 120) if e.delta else (1 if e.num == 5 else -1)
-                    ex_canvas.yview_scroll(delta, "units")
-                except Exception:
-                    pass
-                return "break"
-            try:
-                widget.bind_all("<MouseWheel>", _on_mousewheel)
-                widget.bind_all("<Button-4>", _on_mousewheel)
-                widget.bind_all("<Button-5>", _on_mousewheel)
-            except Exception:
-                pass
-        _bind_mousewheel(ex_canvas)
-        # Give more space to left (cols 0-1) and slightly less to right panel (col 2)
+        ex = ttk.Frame(exec_tab, padding="20")
+        ex.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        # Layout: left content (col 0-1) and right jobs panel (col 2)
         ex.columnconfigure(0, weight=3)
         ex.columnconfigure(1, weight=3)
         ex.columnconfigure(2, weight=2)
-        ex.rowconfigure(2, weight=1)  # Prompt text area expandable
+        ex.rowconfigure(2, weight=1)
 
         exec_title = ttk.Label(ex, text="🎥 Execute Media Workflow", style='Title.TLabel')
         # Constrain title to left content area (columns 0-1) so right panel can start at row 0 col 2
@@ -552,52 +513,51 @@ class FlowBrowserTool:
         # Place status just below actions
         self.exec_status.grid(row=2, column=0, columnspan=2, sticky=tk.W)
 
-        # Jobs view (right side panel with cards)
+        # Jobs view (right side) simplified with tables
         jobs_side = ttk.LabelFrame(ex, text="📋 Tiến trình", padding="10")
-        # Start right-side panel from top row to align with title
         jobs_side.grid(row=0, column=2, rowspan=4, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(15, 0))
         jobs_side.configure(style='Card.TLabelframe')
         jobs_side.columnconfigure(0, weight=1)
         jobs_side.rowconfigure(1, weight=1)
+        jobs_side.rowconfigure(3, weight=1)
 
         header_running = ttk.Frame(jobs_side)
         header_running.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 6))
         header_running.columnconfigure(0, weight=1)
         ttk.Label(header_running, text="Đang chạy", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
         ttk.Label(header_running, text="RUNNING", style='Badge.Running.TLabel').grid(row=0, column=1, sticky=tk.E)
-        # Running cards (scrollable)
-        run_canvas = tk.Canvas(jobs_side, highlightthickness=0, bg=self.colors['surface'], bd=0)
-        run_scroll = ttk.Scrollbar(jobs_side, orient=tk.VERTICAL, command=run_canvas.yview)
-        run_canvas.configure(yscrollcommand=run_scroll.set)
-        run_canvas.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-        run_scroll.grid(row=1, column=1, sticky=(tk.N, tk.S))
-        self.running_cards = ttk.Frame(run_canvas, padding=4, style='Card.TFrame')
-        self.running_cards_id = run_canvas.create_window((0, 0), window=self.running_cards, anchor="nw")
+
+        run_wrap = ttk.Frame(jobs_side)
+        run_wrap.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        run_wrap.columnconfigure(0, weight=1)
+        run_wrap.rowconfigure(0, weight=1)
+        self.running_table = ttk.Treeview(run_wrap, columns=("email","wf","img","prompt"), show="headings", height=6)
+        for col, txt, w in (("email","Email",110),("wf","Workflow",90),("img","Image",100),("prompt","Prompt",240)):
+            self.running_table.heading(col, text=txt)
+            self.running_table.column(col, width=w, stretch=True)
+        run_scroll = ttk.Scrollbar(run_wrap, orient=tk.VERTICAL, command=self.running_table.yview)
+        self.running_table.configure(yscrollcommand=run_scroll.set)
+        self.running_table.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        run_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
 
         header_queue = ttk.Frame(jobs_side)
         header_queue.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(10, 6))
         header_queue.columnconfigure(0, weight=1)
         ttk.Label(header_queue, text="Đang đợi", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
         ttk.Label(header_queue, text="QUEUE", style='Badge.Queued.TLabel').grid(row=0, column=1, sticky=tk.E)
-        # Queue cards (scrollable)
-        queue_canvas = tk.Canvas(jobs_side, highlightthickness=0, bg=self.colors['surface'], bd=0)
-        queue_scroll = ttk.Scrollbar(jobs_side, orient=tk.VERTICAL, command=queue_canvas.yview)
-        queue_canvas.configure(yscrollcommand=queue_scroll.set)
-        queue_canvas.grid(row=3, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-        queue_scroll.grid(row=3, column=1, sticky=(tk.N, tk.S))
-        self.queue_cards = ttk.Frame(queue_canvas, padding=4, style='Card.TFrame')
-        self.queue_cards_id = queue_canvas.create_window((0, 0), window=self.queue_cards, anchor="nw")
 
-        # Update scrollregion on size changes
-        def _bind_configure(canvas: tk.Canvas, inner: ttk.Frame):
-            def on_configure(event):
-                bbox = canvas.bbox("all")
-                if bbox is not None:
-                    canvas.configure(scrollregion=bbox)
-                canvas.itemconfigure(self.running_cards_id if inner is self.running_cards else self.queue_cards_id, width=canvas.winfo_width())
-            inner.bind('<Configure>', on_configure)
-        _bind_configure(run_canvas, self.running_cards)
-        _bind_configure(queue_canvas, self.queue_cards)
+        queue_wrap = ttk.Frame(jobs_side)
+        queue_wrap.grid(row=3, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        queue_wrap.columnconfigure(0, weight=1)
+        queue_wrap.rowconfigure(0, weight=1)
+        self.queue_table = ttk.Treeview(queue_wrap, columns=("email","wf","img","prompt"), show="headings", height=6)
+        for col, txt, w in (("email","Email",110),("wf","Workflow",90),("img","Image",100),("prompt","Prompt",240)):
+            self.queue_table.heading(col, text=txt)
+            self.queue_table.column(col, width=w, stretch=True)
+        queue_scroll = ttk.Scrollbar(queue_wrap, orient=tk.VERTICAL, command=self.queue_table.yview)
+        self.queue_table.configure(yscrollcommand=queue_scroll.set)
+        self.queue_table.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        queue_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S))
 
         # Progress log card
         log_frame = ttk.LabelFrame(ex, text="📜 Log tiến trình", padding="10")
@@ -1284,121 +1244,31 @@ class FlowBrowserTool:
                     prompt = prompt[:117] + '...'
                 return (job.get('email') or '', job.get('wf') or '', img, prompt)
 
-            # Running cards
-            if hasattr(self, 'running_cards'):
-                for child in list(self.running_cards.winfo_children()):
-                    child.destroy()
+            # Running table
+            if hasattr(self, 'running_table'):
                 try:
+                    for i in self.running_table.get_children():
+                        self.running_table.delete(i)
                     if self.exec_current_jobs:
                         jobs = list(self.exec_current_jobs.values())[::-1]
                         for job in jobs:
                             email, wf, img, prompt = fmt_row(job)
-                            card_canvas, shape, top = self._create_rounded_card(self.running_cards, padding=10)
-                            card_canvas.pack(fill='x', pady=8)
-                            # Hover effect by changing outline color
-                            def on_enter(_e, s=shape, c=card_canvas):
-                                try:
-                                    c.itemconfigure(s, outline=self.colors['accent'])
-                                except Exception:
-                                    pass
-                            def on_leave(_e, s=shape, c=card_canvas):
-                                try:
-                                    c.itemconfigure(s, outline=self.colors['border'])
-                                except Exception:
-                                    pass
-                            try:
-                                card_canvas.bind('<Enter>', on_enter)
-                                card_canvas.bind('<Leave>', on_leave)
-                            except Exception:
-                                pass
-                            header = ttk.Frame(top)
-                            header.pack(fill='x', pady=(0, 6))
-                            header.columnconfigure(0, weight=1)
-                            ttk.Label(header, text=f"{email}", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
-                            ttk.Label(header, text="RUNNING", style='Badge.Running.TLabel').grid(row=0, column=1, sticky=tk.E)
-                            ttk.Label(top, text=f"Workflow: {wf}").pack(anchor='w')
-                            if img:
-                                ttk.Label(top, text=f"Image: {img}", foreground=self.colors['subtle']).pack(anchor='w')
-                            if prompt:
-                                ttk.Label(top, text=f"Prompt: {prompt}", foreground=self.colors['subtle'], wraplength=260, justify='left').pack(anchor='w')
-                            # Progress bar
-                            try:
-                                pb = ttk.Progressbar(top, mode='indeterminate', length=200)
-                                pb.pack(fill='x', pady=(8, 0))
-                                pb.start(20)
-                            except Exception:
-                                pass
-                            # Actions
-                            actions = ttk.Frame(top)
-                            actions.pack(fill='x', pady=(8, 0))
-                            ttk.Button(actions, text="⏹️ Stop", style='Secondary.TButton', command=self._stop_execution).pack(side=tk.RIGHT)
-                            try:
-                                sep = ttk.Separator(self.running_cards, orient=tk.HORIZONTAL)
-                                sep.pack(fill='x', pady=(10, 0))
-                            except Exception:
-                                pass
+                            self.running_table.insert('', 'end', values=(email, wf, img, prompt))
                 except Exception:
                     pass
 
-            # Queue cards
-            if hasattr(self, 'queue_cards'):
-                for child in list(self.queue_cards.winfo_children()):
-                    child.destroy()
+            # Queue table
+            if hasattr(self, 'queue_table'):
                 try:
+                    for i in self.queue_table.get_children():
+                        self.queue_table.delete(i)
                     aggregate = []
                     for _, st in self.account_states.items():
                         with st['lock']:
                             aggregate.extend(list(st['queue']))
                     for job in aggregate:
                         email, wf, img, prompt = fmt_row(job)
-                        card_canvas, shape, top = self._create_rounded_card(self.queue_cards, padding=10)
-                        card_canvas.pack(fill='x', pady=8)
-                        def on_enter(_e, s=shape, c=card_canvas):
-                            try:
-                                c.itemconfigure(s, outline=self.colors['accent'])
-                            except Exception:
-                                pass
-                        def on_leave(_e, s=shape, c=card_canvas):
-                            try:
-                                c.itemconfigure(s, outline=self.colors['border'])
-                            except Exception:
-                                pass
-                        try:
-                            card_canvas.bind('<Enter>', on_enter)
-                            card_canvas.bind('<Leave>', on_leave)
-                        except Exception:
-                            pass
-                        header = ttk.Frame(top)
-                        header.pack(fill='x', pady=(0, 6))
-                        header.columnconfigure(0, weight=1)
-                        ttk.Label(header, text=f"{email}", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
-                        ttk.Label(header, text="QUEUED", style='Badge.Queued.TLabel').grid(row=0, column=1, sticky=tk.E)
-                        ttk.Label(top, text=f"Workflow: {wf}").pack(anchor='w')
-                        if img:
-                            ttk.Label(top, text=f"Image: {img}", foreground=self.colors['subtle']).pack(anchor='w')
-                        if prompt:
-                            ttk.Label(top, text=f"Prompt: {prompt}", foreground=self.colors['subtle'], wraplength=260, justify='left').pack(anchor='w')
-                        # Actions
-                        def _remove_from_queue(email=email, wf=wf, img=img, prompt=prompt):
-                            try:
-                                st = self.account_states.get(email)
-                                if not st:
-                                    return
-                                with st['lock']:
-                                    st['queue'] = [q for q in st['queue'] if not (
-                                        (q.get('wf') or '') == wf and (os.path.basename(q.get('media') or '') == img) and (q.get('prompt') or '').replace('\n',' ').strip() == (prompt or '').replace('\n',' ').strip()
-                                    )]
-                                self._refresh_jobs_view()
-                            except Exception:
-                                pass
-                        actions = ttk.Frame(top)
-                        actions.pack(fill='x', pady=(8, 0))
-                        ttk.Button(actions, text="🗑️ Remove", style='Secondary.TButton', command=_remove_from_queue).pack(side=tk.RIGHT)
-                        try:
-                            sep = ttk.Separator(self.queue_cards, orient=tk.HORIZONTAL)
-                            sep.pack(fill='x', pady=(10, 0))
-                        except Exception:
-                            pass
+                        self.queue_table.insert('', 'end', values=(email, wf, img, prompt))
                 except Exception:
                     pass
         except Exception:
