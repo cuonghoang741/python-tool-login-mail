@@ -67,6 +67,14 @@ class FlowBrowserTool:
         self.exec_current_jobs = {}
         self.exec_drivers = {}
 
+        # Error log storage
+        self.error_events = []
+        self.error_log_path = os.path.join(os.getcwd(), "error_events.json")
+        try:
+            self._load_error_events()
+        except Exception:
+            pass
+
         # Profiles (cache per email)
         self.flow_profiles_path = os.path.join(os.getcwd(), "chrome_cache", "flow_profiles.json")
         self.flow_profiles = {}
@@ -82,6 +90,18 @@ class FlowBrowserTool:
 
         if self.use_tk_ui:
             self._build_ui()
+
+        # Route error popups to error log card (no blocking alerts)
+        try:
+            self._orig_showerror = messagebox.showerror
+            def _no_alert_showerror(title, msg):
+                try:
+                    self._log_error(f"{title}: {msg}")
+                except Exception:
+                    pass
+            messagebox.showerror = _no_alert_showerror
+        except Exception:
+            pass
 
     def _apply_luxury_theme(self) -> None:
         """Apply a modern, luxurious ttk theme across widgets."""
@@ -572,6 +592,23 @@ class FlowBrowserTool:
         self.exec_log.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         # Make the log row expandable now that inputs are hidden
         ex.rowconfigure(3, weight=1)
+
+        # Error log card (dedicated area to display failed processes/errors)
+        err_frame = ttk.LabelFrame(ex, text="❌ Nhật ký lỗi", padding="10")
+        err_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(10, 0))
+        err_frame.columnconfigure(0, weight=1)
+        err_frame.rowconfigure(0, weight=1)
+        self.error_log = scrolledtext.ScrolledText(err_frame, height=6, wrap=tk.WORD, state='disabled',
+                                                   bg='#1A1416', fg=self.colors['error'],
+                                                   insertbackground=self.colors['error'],
+                                                   highlightthickness=1, highlightbackground=self.colors['border'])
+        self.error_log.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        # Load existing errors into UI if any
+        try:
+            self._refresh_error_log_ui()
+        except Exception:
+            pass
+        ex.rowconfigure(4, weight=1)
 
         self._refresh_exec_emails()
         # Initialize jobs view
@@ -1830,6 +1867,74 @@ class FlowBrowserTool:
         except Exception:
             pass
 
+    # ===================== Error Log Helpers =====================
+    def _append_error_log(self, text: str) -> None:
+        try:
+            if hasattr(self, 'error_log'):
+                self.error_log.configure(state='normal')
+                self.error_log.insert(tk.END, text)
+                self.error_log.see(tk.END)
+                self.error_log.configure(state='disabled')
+        except Exception:
+            pass
+
+    def _load_error_events(self) -> None:
+        try:
+            if os.path.exists(self.error_log_path):
+                with open(self.error_log_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        self.error_events = data
+        except Exception:
+            self.error_events = []
+
+    def _save_error_events(self) -> None:
+        try:
+            with open(self.error_log_path, 'w', encoding='utf-8') as f:
+                json.dump(self.error_events[-1000:], f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _refresh_error_log_ui(self) -> None:
+        try:
+            if hasattr(self, 'error_log'):
+                self.error_log.configure(state='normal')
+                self.error_log.delete('1.0', tk.END)
+                for e in self.error_events[-300:]:
+                    self.error_log.insert(tk.END, e)
+                self.error_log.see(tk.END)
+                self.error_log.configure(state='disabled')
+        except Exception:
+            pass
+
+    def _log_error(self, message: str) -> None:
+        ts = time.strftime('%H:%M:%S')
+        line = f"[ERROR] {ts} | {message}\n"
+        print(line, end="")
+        try:
+            self.error_events.append(line)
+            # Persist asynchronously
+            threading.Thread(target=self._save_error_events, daemon=True).start()
+        except Exception:
+            pass
+        try:
+            # UI callbacks if any
+            cb = self.ui_callbacks.get('on_log') if hasattr(self, 'ui_callbacks') else None
+            if cb:
+                try:
+                    cb(line)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            # Append to error card
+            self._append_error_log(line)
+            # Also reflect on exec status area in red (non-blocking)
+            self._set_exec_status(message, 'red')
+        except Exception:
+            pass
+
     def _open_frames_upload_panel(self, driver: webdriver.Chrome) -> None:
         """Mở panel thêm media cho workflow Frames to Video theo mô tả UI.
         1) Click nút có icon 'add' (có thể là button với overlay)
@@ -2289,27 +2394,26 @@ class FlowBrowserTool:
 
     def _download_files(self, urls, prompt_text=""):
         try:
-            # Create folder name using prompt-time format
-            if prompt_text:
-                sanitized_prompt = self._sanitize_folder_name(prompt_text)
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                folder_name = f"{sanitized_prompt}-{timestamp}"
-            else:
-                folder_name = time.strftime("%Y%m%d_%H%M%S")
-            
-            out_dir = Path(os.getcwd()) / "downloads" / folder_name
+            # Save all files to common downloads folder (no per-prompt subfolder)
+            out_dir = Path(os.getcwd()) / "downloads"
             out_dir.mkdir(parents=True, exist_ok=True)
-            self._log_exec(f"Creating download folder: {folder_name}")
+            self._log_exec("Using common downloads folder")
             for i, url in enumerate(urls, 1):
                 try:
                     ext = ".mp4"
                     if 'image' in url:
                         ext = ".png"
-                    filename = f"media_{i}{ext}"
-                    dest = out_dir / filename
+                    # Ensure unique filenames to avoid overwriting
+                    ts = time.strftime('%Y%m%d_%H%M%S')
+                    base_name = f"{ts}_media_{i}{ext}"
+                    dest = out_dir / base_name
+                    attempt = 1
+                    while dest.exists() and attempt < 1000:
+                        dest = out_dir / f"{ts}_media_{i}_{attempt}{ext}"
+                        attempt += 1
                     self._log_exec(f"Downloading {filename}...")
                     urllib.request.urlretrieve(url, dest.as_posix())
-                    self._log_exec(f"Downloaded {filename}", success=True)
+                    self._log_exec(f"Downloaded {dest.name}", success=True)
                 except Exception as ex:
                     self._log_exec(f"Failed to download #{i}: {ex}", error=True)
             # No popup: silently finish; the outer finally will close browser and continue queue
