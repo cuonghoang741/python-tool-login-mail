@@ -3,6 +3,7 @@ __pycache__/
 chrome_cache/
 downloads/
 dist/
+dist
 build/
 *.spec
 *.pyc

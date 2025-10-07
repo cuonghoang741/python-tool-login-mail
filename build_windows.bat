@@ -52,9 +52,9 @@ echo Cleaning previous builds...
 if exist dist rmdir /s /q dist
 if exist build rmdir /s /q build
 
-REM Build executable using spec to ensure Tcl/Tk is bundled
-echo Building executable from GoogleFlowTool.spec...
-venv\Scripts\python.exe -m PyInstaller --clean --noconfirm GoogleFlowTool.spec
+REM Build executable (entry = tool launcher)
+echo Building executable from tool_launcher.py (starts at tool selection)...
+venv\Scripts\python.exe -m PyInstaller --clean --noconfirm --name GoogleFlowTool --windowed tool_launcher.py
 if errorlevel 1 (
     echo Error: Build failed
     pause
@@ -63,6 +63,6 @@ if errorlevel 1 (
 
 echo.
 echo Build completed successfully!
-echo Executable location: dist\GoogleFlowTool.exe
+echo Executable location: dist\GoogleFlowTool\GoogleFlowTool.exe
 echo.
 pause
