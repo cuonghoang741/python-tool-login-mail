@@ -782,6 +782,7 @@ class FlowBrowserTool:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_experimental_option("detach", True)
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         
         # Luôn chạy ở chế độ hiển thị (headless = False)
         # Bỏ qua mọi cấu hình headless trước đây
@@ -862,11 +863,29 @@ class FlowBrowserTool:
             self.driver = self._build_chrome(email_addr, existing_cache_dir=exist_dir)
             self.driver.get("https://accounts.google.com/signin")
             self._human_delay(2, 4)
+            try:
+                self._human_warm_up_page(self.driver)
+            except Exception:
+                pass
             self._google_type_email_then_password(self.driver, email_addr, password)
 
             ok = self._wait_signin_success(self.driver, timeout=180)
             if not ok:
-                raise Exception("Không thể đăng nhập tài khoản Google")
+                # Retry via AccountChooser (helps with "This browser or app may not be secure")
+                try:
+                    self._set_status("Thử lại đăng nhập qua AccountChooser...", "orange")
+                    self.driver.get("https://accounts.google.com/AccountChooser?continue=https://labs.google/fx/vi/tools/flow")
+                    self._human_delay(1, 2)
+                    try:
+                        self._human_warm_up_page(self.driver)
+                    except Exception:
+                        pass
+                    self._google_type_email_then_password(self.driver, email_addr, password)
+                    ok = self._wait_signin_success(self.driver, timeout=180)
+                except Exception:
+                    ok = False
+                if not ok:
+                    raise Exception("Không thể đăng nhập tài khoản Google")
 
             # After Google is signed in, open Flow
             self.driver.get("https://labs.google/fx/vi/tools/flow")
@@ -1628,6 +1647,10 @@ class FlowBrowserTool:
             chrome_options.add_argument(f"--user-agent={meta['user_agent']}")
         chrome_options.add_argument("--start-maximized")
         chrome_options.add_argument("--lang=vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+        try:
+            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        except Exception:
+            pass
         
         # Cho phép tùy biến headless cho luồng execute theo self.headless_mode
         try:
@@ -2874,6 +2897,20 @@ class FlowBrowserTool:
     # ===================== Human-like helpers =====================
     def _human_delay(self, min_seconds: float = 1.0, max_seconds: float = 2.5) -> None:
         time.sleep(random.uniform(min_seconds, max_seconds))
+
+    def _human_warm_up_page(self, driver: webdriver.Chrome) -> None:
+        try:
+            for _ in range(random.randint(1, 3)):
+                dy = random.randint(100, 400) * (1 if random.random() < 0.5 else -1)
+                driver.execute_script("window.scrollBy(0, arguments[0]);", dy)
+                time.sleep(random.uniform(0.1, 0.4))
+            try:
+                body = driver.find_element(By.TAG_NAME, 'body')
+                ActionChains(driver).move_to_element_with_offset(body, random.randint(5, 50), random.randint(5, 30)).pause(random.uniform(0.05, 0.2)).perform()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _human_click_el(self, driver: webdriver.Chrome, element) -> None:
         try:

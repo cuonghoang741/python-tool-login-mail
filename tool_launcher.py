@@ -1,9 +1,24 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
 import sys
 import os
 import subprocess
 import traceback
+import ctypes
+
+# Try to import tkinter early; show a native dialog if it's missing
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+except ModuleNotFoundError:
+    try:
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Không tìm thấy tkinter. Hãy cài Python đầy đủ (có Tcl/Tk) hoặc dùng bản build mới.",
+            "Lỗi môi trường Python",
+            0x00000010,
+        )
+    except Exception:
+        pass
+    sys.exit(1)
 
 # Optional modern theming with ttkbootstrap
 try:
@@ -26,6 +41,12 @@ def _launch_gmail():
     # Import and delegate after closing the launcher root
     import gmail_browser_login as gmail
     gmail.main()
+
+
+def _launch_whisk():
+    # Import and delegate after closing the launcher root
+    import whisk_browser_tool as whisk
+    whisk.main()
 
 
 _selected_launcher = None
@@ -79,9 +100,11 @@ def _spawn_tool(entry: str) -> None:
             _launch_flow()
         elif entry == 'gmail':
             _launch_gmail()
+        elif entry == 'whisk':
+            _launch_whisk()
 
 
-def _select_and_quit(root: tk.Tk, launcher: callable) -> None:
+def _select_and_quit(root, launcher: callable) -> None:
     global _selected_launcher
     _selected_launcher = launcher
     try:
@@ -93,7 +116,7 @@ def _select_and_quit(root: tk.Tk, launcher: callable) -> None:
             pass
 
 
-def _spawn_and_quit(root: tk.Tk, entry: str) -> None:
+def _spawn_and_quit(root, entry: str) -> None:
     """Spawn selected tool in a fresh process, then quit the launcher UI."""
     try:
         _spawn_tool(entry)
@@ -151,8 +174,8 @@ def main() -> None:
 
     btn_whisk = ttk.Button(
         container,
-        text="🥣 Whisk (coming soon)",
-        command=lambda: _coming_soon("Whisk"),
+        text="🥣 Whisk",
+        command=lambda: _spawn_and_quit(root, 'whisk'),
         width=24
     )
     btn_whisk.grid(row=1, column=1, padx=8, pady=8, sticky=(tk.W, tk.E))
@@ -168,7 +191,7 @@ def main() -> None:
     # Info
     info = ttk.Label(
         container,
-        text="Veo3 đã sẵn sàng. Whisk/Pokecut đang phát triển.",
+        text="Veo3/Whisk đã sẵn sàng. Pokecut đang phát triển.",
         foreground="#9AA4AF"
     )
     info.grid(row=3, column=0, columnspan=2, pady=(12, 0))
@@ -181,7 +204,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Support CLI entry selection: --entry=flow | --entry=gmail
+    # Support CLI entry selection: --entry=flow | --entry=gmail | --entry=whisk
     entry_arg = next((a for a in sys.argv[1:] if a.startswith("--entry=")), None)
     if entry_arg:
         entry = entry_arg.split("=", 1)[1]
@@ -190,6 +213,8 @@ if __name__ == "__main__":
                 _launch_flow()
             elif entry == 'gmail':
                 _launch_gmail()
+            elif entry == 'whisk':
+                _launch_whisk()
             else:
                 main()
         except ModuleNotFoundError as e:
