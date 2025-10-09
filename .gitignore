@@ -2,6 +2,8 @@ __pycache__/
 .history/
 chrome_cache/
 downloads/
+whisk_downloads
+whisk_errors
 dist/
 dist
 build/
@@ -11,3 +13,4 @@ build/
 *.pyd
 *.pyw
 *.pyz
+venv/

@@ -134,6 +134,7 @@ class WhiskBrowserTool:
         exec_tab = ttk.Frame(notebook)
         notebook.add(login_tab, text="🔐 Đăng nhập Whisk")
         notebook.add(exec_tab, text="🎥 Execute")
+        notebook.select(1)
 
         frame = ttk.Frame(login_tab, padding="20")
         frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
@@ -203,26 +204,15 @@ class WhiskBrowserTool:
 
         ttk.Label(ex, text="🎥 Execute Whisk", style='Title.TLabel').grid(row=0, column=0, pady=(0, 16), sticky=tk.W)
 
-        # Account selection
-        sel = ttk.LabelFrame(ex, text="👤 Chọn tài khoản", padding="12", style='Card.TLabelframe')
-        sel.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 12))
-        sel.columnconfigure(1, weight=1)
-
-        ttk.Label(sel, text="📧 Email:", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W)
-        self.exec_email = tk.StringVar()
-        self.exec_email_combo = ttk.Combobox(sel, textvariable=self.exec_email, state="readonly")
-        self.exec_email_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(8, 0))
-        ttk.Button(sel, text="🔄 Làm mới", command=self._refresh_exec_emails, style='Secondary.TButton').grid(row=0, column=2, padx=(8, 0))
-
         # Config: Headless toggle
         cfg = ttk.LabelFrame(ex, text="⚙️ Cấu hình", padding="12", style='Card.TLabelframe')
-        cfg.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 12))
-        self.headless_mode = tk.BooleanVar(value=False)
+        cfg.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 12))
+        self.headless_mode = tk.BooleanVar(value=True)
         ttk.Checkbutton(cfg, text="Headless (ẩn browser)", variable=self.headless_mode).grid(row=0, column=0, sticky=tk.W)
 
         # Actions
         actions_ex = ttk.Frame(ex)
-        actions_ex.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 8))
+        actions_ex.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 8))
         actions_ex.columnconfigure(0, weight=1)
         actions_ex.columnconfigure(1, weight=1)
         actions_ex.columnconfigure(2, weight=1)
@@ -231,10 +221,10 @@ class WhiskBrowserTool:
 
         # Status + Log
         self.exec_status = ttk.Label(ex, text="✅ Sẵn sàng", style='Success.TLabel')
-        self.exec_status.grid(row=4, column=0, sticky=tk.W)
+        self.exec_status.grid(row=3, column=0, sticky=tk.W)
 
         log_frame = ttk.LabelFrame(ex, text="📜 Log tiến trình", padding="10", style='Card.TLabelframe')
-        log_frame.grid(row=5, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        log_frame.grid(row=4, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         self.exec_log = scrolledtext.ScrolledText(log_frame, height=8, wrap=tk.WORD, state='disabled',
@@ -243,7 +233,7 @@ class WhiskBrowserTool:
 
         # Right side: Progress counters
         side = ttk.LabelFrame(ex, text="📊 Tiến trình", padding="10", style='Card.TLabelframe')
-        side.grid(row=0, column=1, rowspan=6, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(12, 0))
+        side.grid(row=0, column=1, rowspan=5, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(12, 0))
         side.columnconfigure(0, weight=1)
         ttk.Label(side, text="In queue:", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0,4))
         self.lbl_queue = ttk.Label(side, text="0", style='Info.TLabel')
@@ -337,6 +327,8 @@ class WhiskBrowserTool:
         chrome_options.add_argument(f"--user-agent={ua}")
         chrome_options.add_argument("--lang=vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
         chrome_options.add_argument("--start-maximized")
+        # Set consistent window size for better compatibility
+        chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_experimental_option("detach", True)
@@ -349,16 +341,45 @@ class WhiskBrowserTool:
             pass
 
         service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        try:
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        except Exception:
-            pass
-        try:
-            driver.execute_cdp_cmd('Network.enable', {})
-        except Exception:
-            pass
-        return driver
+        
+        # Retry logic for Chrome crashes
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                try:
+                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                except Exception:
+                    pass
+                try:
+                    driver.execute_cdp_cmd('Network.enable', {})
+                except Exception:
+                    pass
+                return driver
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "chrome failed to start" in error_msg or "crashed" in error_msg or "session not created" in error_msg:
+                    if attempt < max_retries - 1:
+                        try:
+                            self._append_log(f"[SYSTEM] {time.strftime('%H:%M:%S')} | Chrome crash detected, đóng browser và thử lại... (lần {attempt + 1}/{max_retries})\n")
+                        except Exception:
+                            pass
+                        # Kill any remaining Chrome processes
+                        self._kill_chrome_processes()
+                        time.sleep(2)  # Wait before retry
+                        continue
+                    else:
+                        try:
+                            self._append_log(f"[ERROR] {time.strftime('%H:%M:%S')} | Chrome crash sau {max_retries} lần thử: {e}\n")
+                        except Exception:
+                            pass
+                        raise e
+                else:
+                    # Re-raise non-crash errors immediately
+                    raise e
+        
+        # Should never reach here, but just in case
+        raise Exception("Không thể khởi tạo Chrome sau nhiều lần thử")
 
     def _login_password_thread(self, email_addr: str, password: str) -> None:
         try:
@@ -768,72 +789,293 @@ class WhiskBrowserTool:
         end_time = time.time() + timeout
         while time.time() < end_time:
             try:
-                # Prefer aria-label
-                candidates = driver.find_elements(By.XPATH,
-                    "//button[@type='submit' and (@aria-label='Gửi câu lệnh' or contains(., 'Gửi câu lệnh') or .//i[normalize-space(text())='arrow_forward'])] | "
-                    "//*[@role='button' and (@aria-label='Gửi câu lệnh' or contains(., 'Gửi câu lệnh'))] | "
-                    "//button[contains(., 'Gửi câu lệnh')]"
-                )
+                # Multiple strategies to find the submit button
+                candidates = []
+                
+                # Strategy 1: Look for the specific button structure with aria-label and arrow_forward icon
+                try:
+                    specific_buttons = driver.find_elements(By.XPATH,
+                        "//button[@type='submit' and @aria-label='Gửi câu lệnh' and .//i[normalize-space(text())='arrow_forward']]"
+                    )
+                    candidates.extend(specific_buttons)
+                except Exception:
+                    pass
+                
+                # Strategy 2: Look for button with aria-label and submit type
+                try:
+                    aria_buttons = driver.find_elements(By.XPATH,
+                        "//button[@type='submit' and @aria-label='Gửi câu lệnh']"
+                    )
+                    candidates.extend(aria_buttons)
+                except Exception:
+                    pass
+                
+                # Strategy 3: Look for button containing arrow_forward icon
+                try:
+                    icon_buttons = driver.find_elements(By.XPATH,
+                        "//button[@type='submit' and .//i[normalize-space(text())='arrow_forward']]"
+                    )
+                    candidates.extend(icon_buttons)
+                except Exception:
+                    pass
+                
+                # Strategy 4: Look for button containing 'Gửi câu lệnh' text
+                try:
+                    text_buttons = driver.find_elements(By.XPATH,
+                        "//button[@type='submit' and contains(., 'Gửi câu lệnh')]"
+                    )
+                    candidates.extend(text_buttons)
+                except Exception:
+                    pass
+                
+                # Strategy 5: Look for any button with submit type and role button
+                try:
+                    generic_buttons = driver.find_elements(By.XPATH,
+                        "//*[@role='button' and @aria-label='Gửi câu lệnh'] | "
+                        "//button[contains(., 'Gửi câu lệnh')]"
+                    )
+                    candidates.extend(generic_buttons)
+                except Exception:
+                    pass
+                
+                # Remove duplicates and check each candidate
+                seen_elements = set()
                 for btn in candidates:
                     try:
+                        # Create a unique identifier for this element
+                        element_id = id(btn)
+                        if element_id in seen_elements:
+                            continue
+                        seen_elements.add(element_id)
+                        
+                        # Check if button is enabled and clickable
                         disabled_attr = btn.get_attribute('disabled')
                         data_state = btn.get_attribute('data-state')
                         is_enabled = (disabled_attr is None) and btn.is_enabled()
-                        if not is_enabled:
-                            continue
+                        
+                        # Also check if button is visible and interactable
                         if not btn.is_displayed():
                             driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
                             time.sleep(0.1)
-                        self._human_click_el(driver, btn)
-                        try:
-                            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Gửi câu lệnh'\n")
-                        except Exception:
-                            pass
-                        return True
+                        
+                        # Try to click if enabled
+                        if is_enabled:
+                            self._human_click_el(driver, btn)
+                            try:
+                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Gửi câu lệnh'\n")
+                            except Exception:
+                                pass
+                            return True
+                        else:
+                            # Log why button is not clickable
+                            try:
+                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Nút 'Gửi câu lệnh' chưa sẵn sàng (disabled={disabled_attr}, enabled={btn.is_enabled()})\n")
+                            except Exception:
+                                pass
                     except Exception:
                         continue
             except Exception:
                 pass
             time.sleep(0.25)
         try:
-            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không thể nhấn 'Gửi câu lệnh' (có thể đang disabled)\n")
+            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không thể nhấn 'Gửi câu lệnh' sau {timeout}s (có thể đang disabled hoặc không tìm thấy)\n")
         except Exception:
             pass
         return False
 
-    def _download_result_images(self, driver: webdriver.Chrome, wait_seconds: int = 30, max_images: int = 10) -> int:
-        """Wait then find <img src="blob:..."> and download images to local folder. Returns count saved."""
+    def _sanitize_filename(self, text: str, max_length: int = 50) -> str:
+        """Convert prompt text to a safe filename by removing/sanitizing special characters."""
+        if not text:
+            return "no_prompt"
+        
+        # Remove or replace problematic characters
+        import re
+        # Keep only alphanumeric, spaces, hyphens, underscores
+        sanitized = re.sub(r'[^\w\s\-_]', '', text)
+        # Replace multiple spaces with single space
+        sanitized = re.sub(r'\s+', ' ', sanitized)
+        # Replace spaces with underscores
+        sanitized = sanitized.replace(' ', '_')
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        # Limit length
+        if len(sanitized) > max_length:
+            sanitized = sanitized[:max_length].rstrip('_')
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = "prompt"
+            
+        return sanitized
+
+    def _kill_chrome_processes(self) -> None:
+        """Kill any remaining Chrome processes to resolve crashes."""
         try:
+            import subprocess
+            import platform
+            system = platform.system().lower()
+            if system == "windows":
+                subprocess.run(["taskkill", "/f", "/im", "chrome.exe"], 
+                             capture_output=True, timeout=5)
+                subprocess.run(["taskkill", "/f", "/im", "chromedriver.exe"], 
+                             capture_output=True, timeout=5)
+            elif system in ["linux", "darwin"]:
+                subprocess.run(["pkill", "-f", "chrome"], 
+                             capture_output=True, timeout=5)
+                subprocess.run(["pkill", "-f", "chromedriver"], 
+                             capture_output=True, timeout=5)
+        except Exception:
+            pass
+
+    def _take_error_screenshot(self, driver: webdriver.Chrome, prompt_text: str = "", error_reason: str = "") -> str | None:
+        """Take a screenshot and save it to whisk_errors folder for debugging."""
+        try:
+            # Create error directory
+            error_dir = os.path.join(os.getcwd(), 'whisk_errors')
+            os.makedirs(error_dir, exist_ok=True)
+            
+            # Generate filename
+            base_filename = self._sanitize_filename(prompt_text, max_length=30)
+            timestamp = int(time.time())
+            error_reason_clean = self._sanitize_filename(error_reason, max_length=20)
+            filename = f"error_{base_filename}_{error_reason_clean}_{timestamp}.png"
+            file_path = os.path.join(error_dir, filename)
+            
+            # Take screenshot
+            driver.save_screenshot(file_path)
+            
+            # Log the screenshot
+            try:
+                self._append_exec_log(f"[ERROR] {time.strftime('%H:%M:%S')} | Đã chụp screenshot lỗi: {filename}\n")
+            except Exception:
+                pass
+                
+            return file_path
+        except Exception as e:
+            try:
+                self._append_exec_log(f"[ERROR] {time.strftime('%H:%M:%S')} | Không thể chụp screenshot lỗi: {str(e)}\n")
+            except Exception:
+                pass
+            return None
+
+    def _download_result_images(self, driver: webdriver.Chrome, wait_seconds: int = 30, max_images: int = 10, skip_count: int = 0, prompt_text: str = "") -> int:
+        """Wait then find <img src="blob:https://labs.google/..."> and download images to local folder. Returns count saved."""
+        screenshot_taken = False  # Flag to prevent duplicate screenshots
+        
+        try:
+            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đợi {wait_seconds}s để tải ảnh kết quả...\n")
             time.sleep(max(0, wait_seconds))
-            imgs = driver.find_elements(By.CSS_SELECTOR, "img[src^='blob:']")
+            
+            # Look for blob URLs specifically from labs.google
+            imgs = driver.find_elements(By.CSS_SELECTOR, "img[src^='blob:https://labs.google']")
+            
+            # Fallback to any blob URL if labs.google specific ones not found
+            if not imgs:
+                imgs = driver.find_elements(By.CSS_SELECTOR, "img[src^='blob:']")
+                
         except Exception:
             imgs = []
         if not imgs:
             try:
                 self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không tìm thấy ảnh kết quả (blob:)\n")
+                # Take screenshot for debugging
+                if not screenshot_taken:
+                    self._take_error_screenshot(driver, prompt_text, "no_images_found")
+                    screenshot_taken = True
             except Exception:
                 pass
             return 0
+        
+        # Check if we have enough new images (at least 2 more than uploaded)
+        max_retries = 3
+        retry_count = 0
+        wait_time = 10
+        
+        while retry_count <= max_retries:
+            try:
+                total_found = len(imgs)
+                new_images_count = max(0, total_found - skip_count)
+                
+                if skip_count > 0:
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Tìm thấy {total_found} ảnh blob, bỏ qua {skip_count} ảnh đã upload, có {new_images_count} ảnh mới...\n")
+                else:
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Tìm thấy {total_found} ảnh blob, bắt đầu tải...\n")
+                
+                # Check if we have at least 2 new images (or no uploaded images)
+                if skip_count == 0 or new_images_count >= 2:
+                    if skip_count > 0:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ✅ Đủ ảnh mới ({new_images_count}), bắt đầu tải...\n")
+                    break
+                else:
+                    if retry_count < max_retries:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ⚠️ Chưa đủ ảnh mới ({new_images_count} < 2), đợi thêm {wait_time}s... (lần {retry_count + 1}/{max_retries})\n")
+                        time.sleep(wait_time)
+                        
+                        # Re-scan for images
+                        try:
+                            imgs = driver.find_elements(By.CSS_SELECTOR, "img[src^='blob:https://labs.google']")
+                            if not imgs:
+                                imgs = driver.find_elements(By.CSS_SELECTOR, "img[src^='blob:']")
+                        except Exception:
+                            imgs = []
+                        
+                        retry_count += 1
+                    else:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ❌ Hết số lần thử ({max_retries}), chỉ có {new_images_count} ảnh mới, tiếp tục tải...\n")
+                        # Take screenshot for debugging insufficient images
+                        if not screenshot_taken:
+                            self._take_error_screenshot(driver, prompt_text, f"insufficient_images_{new_images_count}")
+                            screenshot_taken = True
+                        break
+                        
+            except Exception:
+                break
         # Ensure output directory
-        out_dir = os.path.join(os.getcwd(), 'downloads')
+        out_dir = os.path.join(os.getcwd(), 'whisk_downloads')
         try:
             os.makedirs(out_dir, exist_ok=True)
         except Exception:
             pass
         saved = 0
         for i, img in enumerate(imgs):
-            if i >= max_images:
+            # Skip the first skip_count images (these are uploaded images)
+            if i < skip_count:
+                try:
+                    src = img.get_attribute('src') or ''
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ⏭️ Bỏ qua ảnh {i+1} (đã upload): {src[:50]}...\n")
+                except Exception:
+                    pass
+                continue
+                
+            if (i - skip_count) >= max_images:
                 break
+                
             try:
                 src = img.get_attribute('src') or ''
                 if not src.startswith('blob:'):
                     continue
+                    
+                # Log the blob URL being processed
+                try:
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Xử lý ảnh {i+1}: {src[:50]}...\n")
+                except Exception:
+                    pass
+                
                 data_url = self._fetch_blob_data_url(driver, src)
                 if not data_url:
+                    try:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không thể fetch blob data cho ảnh {i+1}\n")
+                    except Exception:
+                        pass
                     continue
+                    
                 # Parse data URL
                 if not data_url.startswith('data:'):
+                    try:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Data URL không hợp lệ cho ảnh {i+1}\n")
+                    except Exception:
+                        pass
                     continue
+                    
                 header, b64 = data_url.split(',', 1)
                 ext = 'png'
                 if 'image/' in header:
@@ -841,20 +1083,36 @@ class WhiskBrowserTool:
                         ext = header.split('image/')[1].split(';')[0]
                     except Exception:
                         ext = 'png'
-                file_name = f"result_{int(time.time())}_{i}.{ext}"
+                
+                # Generate filename based on prompt
+                base_filename = self._sanitize_filename(prompt_text)
+                timestamp = int(time.time())
+                file_index = i - skip_count + 1  # Start from 1 for generated images
+                file_name = f"{base_filename}_{timestamp}_{file_index}.{ext}"
                 file_path = os.path.join(out_dir, file_name)
+                
                 with open(file_path, 'wb') as f:
                     f.write(base64.b64decode(b64))
                 saved += 1
+                
                 try:
-                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã lưu ảnh: {file_path}\n")
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ✅ Đã lưu ảnh {i+1}: {file_path}\n")
                 except Exception:
                     pass
-            except Exception:
+                    
+            except Exception as e:
+                try:
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ❌ Lỗi xử lý ảnh {i+1}: {str(e)}\n")
+                except Exception:
+                    pass
                 continue
         if saved == 0:
             try:
                 self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không thể tải về ảnh blob\n")
+                # Take screenshot for debugging download failure
+                if not screenshot_taken:
+                    self._take_error_screenshot(driver, prompt_text, "download_failed")
+                    screenshot_taken = True
             except Exception:
                 pass
         return saved
@@ -1005,7 +1263,7 @@ class WhiskBrowserTool:
                 except Exception:
                     file_inputs = []
                 if file_inputs:
-                    for path in image_paths:
+                    for idx_path, path in enumerate(image_paths):
                         try:
                             # Ensure the input is interactable
                             try:
@@ -1013,7 +1271,8 @@ class WhiskBrowserTool:
                             except Exception:
                                 pass
                             file_inputs[0].send_keys(path)
-                            time.sleep(0.3)
+                            # Wait 3 seconds between each upload as requested
+                            time.sleep(3.0)
                             uploaded_any = True
                         except Exception:
                             pass
@@ -1057,7 +1316,8 @@ class WhiskBrowserTool:
                             except Exception:
                                 pass
                             inputs[0].send_keys(image_path)
-                            time.sleep(0.4)
+                            # Wait 3 seconds after upload
+                            time.sleep(3.0)
                             return True
                         # If no input found, click the upload button by label inside this toolbar
                         candidates = tb.find_elements(By.XPATH,
@@ -1073,7 +1333,8 @@ class WhiskBrowserTool:
                                 except Exception:
                                     pass
                                 inputs[0].send_keys(image_path)
-                                time.sleep(0.4)
+                                # Wait 3 seconds after upload
+                                time.sleep(3.0)
                                 return True
                     except Exception:
                         continue
@@ -1107,11 +1368,6 @@ class WhiskBrowserTool:
         }
         self._save_profiles()
         self._refresh_profiles_list()
-        # Also refresh execute email list if exec tab is present
-        try:
-            self._refresh_exec_emails()
-        except Exception:
-            pass
 
     # ===================== Profile actions =====================
     def _open_selected_profile(self) -> None:
@@ -1158,6 +1414,14 @@ class WhiskBrowserTool:
                 chrome_options.add_argument("--headless")
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
+                # Set window size for headless mode (16-inch laptop resolution)
+                chrome_options.add_argument("--window-size=1920,1080")
+                chrome_options.add_argument("--start-maximized")
+                # Additional options for better headless rendering
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--disable-extensions")
+                chrome_options.add_argument("--disable-plugins")
+                # Note: We don't disable images as we need them for downloads
         except Exception:
             pass
         try:
@@ -1165,40 +1429,41 @@ class WhiskBrowserTool:
         except Exception:
             pass
         service = Service(ChromeDriverManager().install())
-        drv = webdriver.Chrome(service=service, options=chrome_options)
-        try:
-            drv.execute_cdp_cmd('Network.enable', {})
-        except Exception:
-            pass
-        return drv
-
-    # ===== Execute actions =====
-    def _refresh_exec_emails(self) -> None:
-        try:
-            emails = list(self.whisk_profiles.keys())
-            if hasattr(self, 'exec_email_combo'):
-                self.exec_email_combo['values'] = emails
-            if emails and hasattr(self, 'exec_email') and not self.exec_email.get():
-                self.exec_email.set(emails[0])
-        except Exception:
-            pass
-
-    def _open_whisk_for_exec(self) -> None:
-        email_addr = getattr(self, 'exec_email', tk.StringVar()).get()
-        if not email_addr:
+        
+        # Retry logic for Chrome crashes
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                messagebox.showerror("Lỗi", "Vui lòng chọn email đã có cache!")
-            except Exception:
-                pass
-            return
-        meta = self.whisk_profiles.get(email_addr)
-        if not meta:
-            try:
-                messagebox.showerror("Lỗi", "Không tìm thấy cache cho email đã chọn!")
-            except Exception:
-                pass
-            return
-        threading.Thread(target=self._open_profile_thread, args=(email_addr, meta), daemon=True).start()
+                drv = webdriver.Chrome(service=service, options=chrome_options)
+                try:
+                    drv.execute_cdp_cmd('Network.enable', {})
+                except Exception:
+                    pass
+                return drv
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "chrome failed to start" in error_msg or "crashed" in error_msg or "session not created" in error_msg:
+                    if attempt < max_retries - 1:
+                        try:
+                            self._append_exec_log(f"[SYSTEM] {time.strftime('%H:%M:%S')} | Chrome crash detected, đóng browser và thử lại... (lần {attempt + 1}/{max_retries})\n")
+                        except Exception:
+                            pass
+                        # Kill any remaining Chrome processes
+                        self._kill_chrome_processes()
+                        time.sleep(2)  # Wait before retry
+                        continue
+                    else:
+                        try:
+                            self._append_exec_log(f"[ERROR] {time.strftime('%H:%M:%S')} | Chrome crash sau {max_retries} lần thử: {e}\n")
+                        except Exception:
+                            pass
+                        raise e
+                else:
+                    # Re-raise non-crash errors immediately
+                    raise e
+        
+        # Should never reach here, but just in case
+        raise Exception("Không thể khởi tạo Chrome sau nhiều lần thử")
 
     # ===== Job queue & execution =====
     def _enqueue_or_start_account_job(self, email_addr: str, meta: dict, row: dict) -> None:
@@ -1253,6 +1518,9 @@ class WhiskBrowserTool:
             except Exception as _ex:
                 self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Lỗi nhập promt: {_ex}\n")
 
+            # Initialize uploaded image count
+            uploaded_image_count = 0
+            
             # Nếu có ảnh, nhấn nút "Thêm hình ảnh"
             try:
                 has_image = any([
@@ -1281,15 +1549,21 @@ class WhiskBrowserTool:
                         ('', [p for p in [row.get('screen_image')] if (p or '').strip()]),
                         ('', [p for p in [row.get('kind_image')] if (p or '').strip()]),
                     ]
+                    
+                    # Count total uploaded images
                     for idx, (ptext, imgs) in enumerate(field_sets):
                         # Với index 0: nhập prompt trước rồi upload image_1 trong container
                         imgs_to_use = imgs
+                        if imgs_to_use:
+                            uploaded_image_count += len(imgs_to_use)
                         if ptext or imgs_to_use:
                             filled = self._fill_prompt_and_images_at_index(drv, idx, ptext, imgs_to_use)
                             if filled:
                                 self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: đã tải ảnh/nhập văn bản\n")
                             else:
                                 self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: không tìm thấy container\n")
+                    
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Tổng cộng đã upload {uploaded_image_count} ảnh\n")
                     # After finishing all uploads, click the aspect_ratio button and pick size if provided
                     try:
                         if self._open_aspect_ratio_menu(drv):
@@ -1314,8 +1588,9 @@ class WhiskBrowserTool:
                         pass
                     # Wait and download result images (blob: URLs)
                     try:
-                        saved_count = self._download_result_images(drv, wait_seconds=30, max_images=10)
-                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã tải {saved_count} ảnh kết quả\n")
+                        main_prompt = (row.get('main promt') or '').strip()
+                        saved_count = self._download_result_images(drv, wait_seconds=30, max_images=10, skip_count=uploaded_image_count, prompt_text=main_prompt)
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã tải {saved_count} ảnh kết quả mới\n")
                     except Exception:
                         pass
             except Exception as _ex:
@@ -1562,7 +1837,14 @@ class WhiskBrowserTool:
             # Dispatch jobs round-robin across cached accounts
             emails = list(self.whisk_profiles.keys())
             if not emails:
-                messagebox.showerror("Lỗi", "Chưa có account nào trong cache!")
+                try:
+                    self._set_exec_status("Bạn cần đăng nhập ít nhất một tài khoản trước khi import.", 'orange')
+                except Exception:
+                    pass
+                try:
+                    messagebox.showwarning("Cần đăng nhập", "Bạn cần đăng nhập ít nhất một tài khoản trước khi import.")
+                except Exception:
+                    pass
                 return
             self._set_exec_status(f"Imported {len(rows)} row(s) - dispatching...", 'orange')
             idx_email = 0
@@ -1576,6 +1858,41 @@ class WhiskBrowserTool:
             self._set_exec_status("Jobs enqueued/started.", 'green')
         except Exception as ex:
             messagebox.showerror("Lỗi", f"Không thể import Excel: {ex}")
+
+    def _close_all_browsers(self) -> None:
+        """Close all browser instances (main driver and execution drivers)."""
+        try:
+            closed_count = 0
+            
+            # Close main driver
+            if hasattr(self, 'driver') and self.driver is not None:
+                try:
+                    self.driver.quit()
+                    self.driver = None
+                    closed_count += 1
+                except Exception:
+                    pass
+            
+            # Close all execution drivers
+            if hasattr(self, 'exec_drivers') and self.exec_drivers:
+                for email, driver in list(self.exec_drivers.items()):
+                    try:
+                        if driver is not None:
+                            driver.quit()
+                            closed_count += 1
+                    except Exception:
+                        pass
+                self.exec_drivers.clear()
+            
+            # Log the cleanup
+            if closed_count > 0:
+                try:
+                    self._append_exec_log(f"[SYSTEM] {time.strftime('%H:%M:%S')} | Đã đóng {closed_count} browser instances\n")
+                except Exception:
+                    pass
+                
+        except Exception:
+            pass
 
     def _set_status(self, text: str, color: str) -> None:
         try:
@@ -1607,11 +1924,8 @@ def main() -> None:
 
     def _on_app_close():
         try:
-            try:
-                if getattr(app, 'driver', None) is not None:
-                    app.driver.quit()
-            except Exception:
-                pass
+            # Close all browser instances
+            app._close_all_browsers()
         except Exception:
             pass
         try:
