@@ -1,0 +1,16 @@
+[
+  "[ERROR] 21:09:41 | Lỗi: Chưa có account nào trong cache!\n",
+  "[ERROR] 22:45:13 | Lỗi: Vui lòng nhập Prompt!\n",
+  "[ERROR] 22:51:51 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 23:05:02 | Lỗi: Vui lòng nhập Prompt!\n",
+  "[ERROR] 23:29:03 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 23:38:44 | Lỗi: Không thể tạo template: [Errno 13] Permission denied: 'C:/Users/admin/Downloads/flow_template.xlsx'\n",
+  "[ERROR] 21:09:10 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 21:11:23 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 21:13:45 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 21:45:17 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 21:47:24 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
+  "[ERROR] 02:47:04 | Lỗi: Không thể tạo story prompts: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.\n",
+  "[ERROR] 02:51:05 | Lỗi: Model Gemini không tồn tại hoặc không được hỗ trợ. Vui lòng kiểm tra API key hoặc thử lại sau.\n",
+  "[ERROR] 02:55:07 | Lỗi: Model Gemini không tồn tại hoặc không được hỗ trợ. Vui lòng kiểm tra API key hoặc thử lại sau.\n"
+]

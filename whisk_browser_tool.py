@@ -30,8 +30,8 @@ except Exception:
     _HAS_TTKBOOTSTRAP = False
 
 
-WHISK_URL = "https://labs.google/fx/tools/whisk"
-WHISK_PROJECT_URL = "https://labs.google/fx/tools/whisk/project"
+WHISK_URL = "https://labs.google/fx/vi/tools/whisk"
+WHISK_PROJECT_URL = "https://labs.google/fx/vi/tools/whisk/project"
 
 
 class WhiskBrowserTool:
@@ -59,6 +59,7 @@ class WhiskBrowserTool:
         self.exec_drivers = {}
         self.exec_success_count = 0
         self.exec_error_count = 0
+        self.job_counter = 0
 
         # Profiles (cache per email)
         self.whisk_profiles_path = os.path.join(os.getcwd(), "chrome_cache", "whisk_profiles.json")
@@ -399,7 +400,7 @@ class WhiskBrowserTool:
                 # Retry via AccountChooser as a fallback for "This browser or app may not be secure"
                 try:
                     self._set_status("Thử lại đăng nhập qua AccountChooser...", "orange")
-                    self.driver.get("https://accounts.google.com/AccountChooser?continue=https://labs.google/fx/tools/whisk")
+                    self.driver.get("https://accounts.google.com/AccountChooser?continue=https://labs.google/fx/vi/tools/whisk")
                     self._human_delay(1.0, 2.0)
                     self._human_warm_up_page(self.driver)
                     self._google_type_email_then_password(self.driver, email_addr, password)
@@ -412,6 +413,12 @@ class WhiskBrowserTool:
             # After signed in, open Whisk
             self.driver.get(WHISK_URL)
             self._wait_until(lambda: "labs.google" in (self.driver.current_url or ""), timeout=120)
+
+            # Close welcome modal if it appears
+            try:
+                self._close_welcome_modal(self.driver)
+            except Exception:
+                pass
 
             # If Whisk has a final "Sign in with Google" gate, click it
             try:
@@ -437,6 +444,37 @@ class WhiskBrowserTool:
             self.login_btn.config(state="normal")
 
     # ===================== Selenium helpers =====================
+    def _close_welcome_modal(self, driver: webdriver.Chrome, timeout: int = 10) -> bool:
+        """Close the welcome modal if it appears. Returns True if modal was found and closed."""
+        try:
+            # Look for the close button with aria-label "Close this modal"
+            close_button_xpaths = [
+                "//button[@aria-label='Close this modal']",
+                "//button[contains(@aria-label, 'Close this modal')]",
+                "//button[.//i[normalize-space(text())='close']]",
+                "//button[contains(@class, 'kzGuMg')]",
+                "//button[contains(@class, 'sc-') and .//i[normalize-space(text())='close']]",
+            ]
+            
+            end_time = time.time() + timeout
+            while time.time() < end_time:
+                for xp in close_button_xpaths:
+                    try:
+                        el = driver.find_element(By.XPATH, xp)
+                        if el.is_displayed() and el.is_enabled():
+                            self._human_click_el(driver, el)
+                            try:
+                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã đóng welcome modal\n")
+                            except Exception:
+                                pass
+                            return True
+                    except Exception:
+                        continue
+                time.sleep(0.5)
+            return False
+        except Exception:
+            return False
+
     def _click_whisk_google_signin(self, driver: webdriver.Chrome) -> None:
         candidates = [
             "//button[.//span[normalize-space()='Sign in with Google']]",
@@ -539,9 +577,18 @@ class WhiskBrowserTool:
                 pass
 
     def _human_type_el(self, element, text: str) -> None:
-        for ch in text:
-            element.send_keys(ch)
-            time.sleep(random.uniform(0.02, 0.08))
+        try:
+            # Replace newlines with spaces to prevent accidental form submission
+            safe_text = text.replace('\n', ' ').replace('\r', ' ')
+            # Type the full text at once for immediate parsing (no per-char delay)
+            element.send_keys(safe_text)
+        except Exception:
+            # Best-effort fallback: ignore if element refuses bulk input
+            try:
+                safe_text = text.replace('\n', ' ').replace('\r', ' ')
+                element.send_keys(safe_text)
+            except Exception:
+                pass
 
     def _type_prompt_into_any_textarea(self, driver: webdriver.Chrome, text: str, timeout: int = 15) -> bool:
         """Type text into a visible <textarea> (do not rely on class selectors)."""
@@ -697,16 +744,56 @@ class WhiskBrowserTool:
             pass
         return False
 
+    def _normalize_aspect_ratio(self, size_text: str) -> str:
+        """Normalize aspect ratio format: 16:09 -> 16:9, 09:16 -> 9:16, 16:09:00 -> 16:9, etc."""
+        if not size_text:
+            return size_text
+        
+        try:
+            # Handle time format like "16:09:00" -> "16:9"
+            if ':' in size_text:
+                parts = size_text.split(':')
+                if len(parts) >= 2:
+                    # Take only first two parts (hours:minutes), ignore seconds
+                    left = str(int(parts[0])) if parts[0].isdigit() else parts[0]
+                    right = str(int(parts[1])) if parts[1].isdigit() else parts[1]
+                    return f"{left}:{right}"
+        except Exception:
+            pass
+        
+        return size_text
+
     def _pick_aspect_ratio(self, driver: webdriver.Chrome, size_text: str, timeout: int = 6) -> bool:
         """Pick the aspect ratio option by visible text like '1:1', '9:16', '16:9', '3:4', '4:3'."""
         if not (size_text or '').strip():
             return False
+        
+        # Normalize size format: convert 16:09 -> 16:9, 09:16 -> 9:16, etc.
         label = (size_text or '').strip()
-        xpaths = [
-            f"//div[@role='dialog']//button[.//span[normalize-space(text())='{label}']]",
-            f"//div[@role='dialog']//span[normalize-space(text())='{label}']/ancestor::button[1]",
-            f"//button[.//span[normalize-space(text())='{label}']]",
-        ]
+        normalized_label = self._normalize_aspect_ratio(label)
+        
+        # Try both original and normalized formats
+        search_labels = [label, normalized_label]
+        if label != normalized_label:
+            search_labels = [normalized_label, label]  # Try normalized first
+        
+        xpaths = []
+        for search_label in search_labels:
+            # Generic XPaths that don't rely on specific CSS classes
+            xpaths.extend([
+                # Button containing span with exact text
+                f"//button[.//span[normalize-space(text())='{search_label}']]",
+                # Any element with role button containing span with text
+                f"//*[@role='button' and .//span[normalize-space(text())='{search_label}']]",
+                # Button containing any element with exact text
+                f"//button[.//*[normalize-space(text())='{search_label}']]",
+                # Generic fallbacks
+                f"//div[@role='dialog']//button[.//span[normalize-space(text())='{search_label}']]",
+                f"//div[@role='dialog']//span[normalize-space(text())='{search_label}']/ancestor::button[1]",
+                # Clickable element containing the text
+                f"//*[normalize-space(text())='{search_label}']/ancestor::*[self::button or @role='button'][1]",
+            ])
+        
         end_time = time.time() + timeout
         while time.time() < end_time:
             for xp in xpaths:
@@ -716,12 +803,16 @@ class WhiskBrowserTool:
                         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
                         time.sleep(0.05)
                     self._human_click_el(driver, el)
+                    try:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã chọn size: {search_label}\n")
+                    except Exception:
+                        pass
                     return True
                 except Exception:
                     continue
             time.sleep(0.2)
         try:
-            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không tìm thấy tùy chọn size '{label}'\n")
+            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không tìm thấy tùy chọn size '{label}' (đã thử: {', '.join(search_labels)})\n")
         except Exception:
             pass
         return False
@@ -1358,6 +1449,48 @@ class WhiskBrowserTool:
             time.sleep(interval)
         return False
 
+    def _is_driver_alive(self, driver: webdriver.Chrome | None) -> bool:
+        try:
+            if driver is None:
+                return False
+            # A simple no-op command to verify session
+            driver.current_url  # access property to trigger
+            return True
+        except Exception:
+            return False
+
+    def _open_new_tab_and_close_current(self, driver: webdriver.Chrome, url: str) -> None:
+        """Open a new tab to the given URL, then close the previous tab and switch to the new one."""
+        try:
+            old_handle = driver.current_window_handle
+            # Open new tab
+            try:
+                driver.switch_to.new_window('tab')
+            except Exception:
+                # Fallback
+                driver.execute_script("window.open('about:blank','_blank');")
+                handles = driver.window_handles
+                driver.switch_to.window(handles[-1])
+            # Navigate in new tab
+            driver.get(url)
+            # Close the old tab if it still exists
+            try:
+                driver.switch_to.window(old_handle)
+                driver.close()
+            except Exception:
+                pass
+            # Switch back to the new tab (last handle)
+            try:
+                driver.switch_to.window(driver.window_handles[-1])
+            except Exception:
+                pass
+        except Exception:
+            # Fallback: just navigate in the same tab
+            try:
+                driver.get(url)
+            except Exception:
+                pass
+
     def _remember_profile(self, email_addr: str, cache_dir: str, user_agent: str) -> None:
         if not email_addr:
             return
@@ -1392,6 +1525,13 @@ class WhiskBrowserTool:
             # Open the Whisk project page directly as requested
             drv.get(WHISK_PROJECT_URL)
             self._wait_until(lambda: "labs.google" in (drv.current_url or ""), timeout=120)
+            
+            # Close welcome modal if it appears
+            try:
+                self._close_welcome_modal(drv)
+            except Exception:
+                pass
+                
             self._set_status(f"Đã mở Whisk cho {email_addr}", "green")
             self._set_exec_status(f"Đã mở Whisk cho {email_addr}", "green")
         except Exception as ex:
@@ -1467,7 +1607,10 @@ class WhiskBrowserTool:
 
     # ===== Job queue & execution =====
     def _enqueue_or_start_account_job(self, email_addr: str, meta: dict, row: dict) -> None:
-        job = {"email": email_addr, "meta": meta, "row": row}
+        # Assign a monotonically increasing job id for clearer logs
+        self.job_counter = getattr(self, 'job_counter', 0) + 1
+        job_id = self.job_counter
+        job = {"email": email_addr, "meta": meta, "row": row, "job_id": job_id}
         st = self.account_states.get(email_addr)
         if st is None:
             st = {'queue': [], 'running': False, 'lock': threading.Lock()}
@@ -1480,136 +1623,190 @@ class WhiskBrowserTool:
                 st['running'] = True
                 action = "start"
         if action == "queue":
-            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Queued job for {email_addr}\n")
+            self._append_exec_log(f"[JOB #{job_id}] {time.strftime('%H:%M:%S')} | Queued for {email_addr}\n")
             try:
                 self._update_exec_counters()
             except Exception:
                 pass
         else:
-            threading.Thread(target=self._execute_row_thread, args=(email_addr, meta, row), daemon=True).start()
+            self._append_exec_log(f"[JOB #{job_id}] {time.strftime('%H:%M:%S')} | Started for {email_addr}\n")
+            threading.Thread(target=self._execute_row_thread, args=(email_addr, meta, row, job_id), daemon=True).start()
 
-    def _execute_row_thread(self, email_addr: str, meta: dict, row: dict) -> None:
+    def _execute_row_thread(self, email_addr: str, meta: dict, row: dict, job_id: int | None = None) -> None:
         try:
-            drv = self._open_profile_driver(meta)
-            self.exec_drivers[email_addr] = drv
+            # Reuse existing driver if possible; otherwise create a new one
+            drv = self.exec_drivers.get(email_addr)
+            if not self._is_driver_alive(drv):
+                drv = self._open_profile_driver(meta)
+                self.exec_drivers[email_addr] = drv
             self.stop_exec = False
             self._set_exec_status(f"Mở Whisk cho {email_addr}...", 'orange')
-            drv.get(WHISK_PROJECT_URL)
-            self._wait_until(lambda: "labs.google" in (drv.current_url or ""), timeout=120)
-            time.sleep(3)
-            # Click "Nhập công cụ" if present before proceeding
+            # Prepare a concise summary for logs
             try:
-                if self._click_button_by_text(drv, "Nhập công cụ", timeout=6):
-                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Nhập công cụ'\n")
+                main_prompt_preview = (row.get('main promt') or '')[:60]
+            except Exception:
+                main_prompt_preview = ''
+            try:
+                size_preview = (row.get('size') or '')
+            except Exception:
+                size_preview = ''
+            self._append_exec_log(f"[JOB #{job_id}] {time.strftime('%H:%M:%S')} | START email={email_addr} size={size_preview} main='{main_prompt_preview}'\n")
+            # Open new tab for this execution and close the previous one
+            self._open_new_tab_and_close_current(drv, WHISK_PROJECT_URL)
+            self._wait_until(lambda: "labs.google" in (drv.current_url or ""), timeout=120)
+            
+            # Close welcome modal if it appears
+            try:
+                self._close_welcome_modal(drv)
             except Exception:
                 pass
-            # Nhập main promt vào textarea (không dùng class)
-            try:
-                main_prompt = (row.get('main promt') or '').strip()
-                if main_prompt:
-                    self._type_prompt_into_any_textarea(drv, main_prompt)
-                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhập main promt vào textarea\n")
-                # Chọn size nếu có: mở menu, đợi 1s, rồi chọn option
-                size_val = (row.get('size') or '').strip()
-                if size_val:
-                    if self._open_aspect_ratio_menu(drv):
-                        time.sleep(1)
-                        self._pick_aspect_ratio(drv, size_val)
-            except Exception as _ex:
-                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Lỗi nhập promt: {_ex}\n")
-
-            # Initialize uploaded image count
-            uploaded_image_count = 0
-            
-            # Nếu có ảnh, nhấn nút "Thêm hình ảnh"
-            try:
-                has_image = any([
-                    (row.get('image_1') or '').strip(),
-                    (row.get('image_2') or '').strip(),
-                    (row.get('kind_image') or '').strip(),
-                    (row.get('screen_image') or '').strip(),
-                ])
-                if has_image:
-                    # Ensure the global 'Thêm hình ảnh' entry point is clicked first
-                    try:
-                        if self._click_add_image_button(drv):
-                            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Thêm hình ảnh'\n")
+                
+            # Retry từ đầu nếu không đủ 2 ảnh kết quả (tối đa 2 lần retry)
+            attempt_success = False
+            max_attempts = 3  # 1 lần đầu + 2 lần retry
+            for attempt in range(1, max_attempts + 1):
+                time.sleep(3)
+                # Click "Nhập công cụ" nếu có
+                try:
+                    if self._click_button_by_text(drv, "Nhập công cụ", timeout=1):
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Nhập công cụ' (lần {attempt}/{max_attempts})\n")
+                except Exception:
+                    pass
+                # Nhập main promt và chọn size
+                try:
+                    main_prompt = (row.get('main promt') or '').strip()
+                    if main_prompt:
+                        self._type_prompt_into_any_textarea(drv, main_prompt)
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhập main promt vào textarea (lần {attempt}/{max_attempts})\n")
+                    size_val = (row.get('size') or '').strip()
+                    if size_val:
+                        if self._open_aspect_ratio_menu(drv):
                             time.sleep(1)
-                            # Immediately add a new category section as requested
-                            if self._click_button_by_aria_label(drv, "Thêm danh mục mới", timeout=4):
-                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Thêm danh mục mới'\n")
+                            self._pick_aspect_ratio(drv, size_val)
+                except Exception as _ex:
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Lỗi nhập promt: {_ex}\n")
+
+                # Upload ảnh nếu có
+                uploaded_image_count = 0
+                try:
+                    has_image = any([
+                        (row.get('image_1') or '').strip(),
+                        (row.get('image_2') or '').strip(),
+                        (row.get('kind_image') or '').strip(),
+                        (row.get('screen_image') or '').strip(),
+                    ])
+                    if has_image:
+                        try:
+                            if self._click_add_image_button(drv):
+                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Thêm hình ảnh' (lần {attempt}/{max_attempts})\n")
                                 time.sleep(1)
-                    except Exception:
-                        pass
-                    # Không upload sớm qua toolbar; thực hiện upload trong container index 0 sau khi nhập prompt
-                    # Fill slots by index with images only (no per-image prompt)
-                    field_sets = [
-                        ('', [p for p in [row.get('image_1')] if (p or '').strip()]),
-                        ('', [p for p in [row.get('image_2')] if (p or '').strip()]),
-                        ('', [p for p in [row.get('screen_image')] if (p or '').strip()]),
-                        ('', [p for p in [row.get('kind_image')] if (p or '').strip()]),
-                    ]
-                    
-                    # Count total uploaded images
-                    for idx, (ptext, imgs) in enumerate(field_sets):
-                        # Với index 0: nhập prompt trước rồi upload image_1 trong container
-                        imgs_to_use = imgs
-                        if imgs_to_use:
-                            uploaded_image_count += len(imgs_to_use)
-                        if ptext or imgs_to_use:
-                            filled = self._fill_prompt_and_images_at_index(drv, idx, ptext, imgs_to_use)
-                            if filled:
-                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: đã tải ảnh/nhập văn bản\n")
-                            else:
-                                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: không tìm thấy container\n")
-                    
-                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Tổng cộng đã upload {uploaded_image_count} ảnh\n")
-                    # After finishing all uploads, click the aspect_ratio button and pick size if provided
+                                if self._click_button_by_aria_label(drv, "Thêm danh mục mới", timeout=4):
+                                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã nhấn 'Thêm danh mục mới'\n")
+                                    time.sleep(1)
+                        except Exception:
+                            pass
+                        field_sets = [
+                            ('', [p for p in [row.get('image_1')] if (p or '').strip()]),
+                            ('', [p for p in [row.get('image_2')] if (p or '').strip()]),
+                            ('', [p for p in [row.get('screen_image')] if (p or '').strip()]),
+                            ('', [p for p in [row.get('kind_image')] if (p or '').strip()]),
+                        ]
+                        for idx, (ptext, imgs) in enumerate(field_sets):
+                            # Only keep images that actually exist on disk
+                            imgs_to_use = []
+                            for _p in imgs:
+                                try:
+                                    if os.path.isfile(_p):
+                                        imgs_to_use.append(_p)
+                                    else:
+                                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | ⚠️ Ảnh không tồn tại, bỏ qua: {_p}\n")
+                                except Exception:
+                                    continue
+                            if imgs_to_use:
+                                uploaded_image_count += len(imgs_to_use)
+                            if ptext or imgs_to_use:
+                                filled = self._fill_prompt_and_images_at_index(drv, idx, ptext, imgs_to_use)
+                                if filled:
+                                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: đã tải ảnh/nhập văn bản\n")
+                                else:
+                                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: không tìm thấy container\n")
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Tổng cộng đã upload {uploaded_image_count} ảnh\n")
+                    else:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không có hình ảnh để upload, tiếp tục với text prompt\n")
+                    # Chọn size sau upload (nếu cần)
                     try:
                         if self._open_aspect_ratio_menu(drv):
-                            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã mở menu Tỷ lệ khung hình sau khi upload ảnh\n")
+                            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã mở menu Tỷ lệ khung hình\n")
                             time.sleep(1)
                             size_val_after = (row.get('size') or '').strip()
                             if size_val_after:
                                 self._pick_aspect_ratio(drv, size_val_after)
                     except Exception:
                         pass
-                    # Open tune/settings and set random seed
+                    # Tune + seed
                     try:
                         if self._open_tune_menu(drv):
                             time.sleep(1)
                             self._set_random_seed(drv)
                     except Exception:
                         pass
-                    # Finally click submit/execute
+                    # Gửi câu lệnh
                     try:
                         self._click_submit_execute(drv)
                     except Exception:
                         pass
-                    # Wait and download result images (blob: URLs)
+                    # Tải ảnh kết quả
                     try:
                         main_prompt = (row.get('main promt') or '').strip()
                         saved_count = self._download_result_images(drv, wait_seconds=30, max_images=10, skip_count=uploaded_image_count, prompt_text=main_prompt)
                         self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã tải {saved_count} ảnh kết quả mới\n")
                     except Exception:
-                        pass
-            except Exception as _ex:
-                self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Lỗi click Thêm hình ảnh: {_ex}\n")
+                        saved_count = 0
+                except Exception as _ex:
+                    self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Lỗi xử lý hình ảnh: {_ex}\n")
+                    saved_count = 0
 
-            # For now, just log the row summary
+                # Kiểm tra điều kiện đủ ảnh
+                if saved_count >= 2:
+                    attempt_success = True
+                    break
+                else:
+                    if attempt < max_attempts:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không đủ 2 ảnh (có {saved_count}). Thử lại từ đầu ({attempt+1}/{max_attempts})...\n")
+                        try:
+                            self._open_new_tab_and_close_current(drv, WHISK_PROJECT_URL)
+                            self._wait_until(lambda: "labs.google" in (drv.current_url or ""), timeout=120)
+                            time.sleep(2)
+                            try:
+                                self._close_welcome_modal(drv)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                    else:
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Hết số lần retry. Vẫn không đủ 2 ảnh.\n")
+
+            # Tổng kết và cập nhật counters theo kết quả
             summary = (
-                f"size={row.get('size') or ''} | main='{(row.get('main promt') or '')[:60]}' | "
+                f"size={row.get('size') or ''} | main='" + (row.get('main promt') or '')[:60] + "' | "
                 f"img1={os.path.basename(row.get('image_1') or '')} | img2={os.path.basename(row.get('kind_image') or row.get('image_2') or '')}"
             )
             self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Executing: {summary}\n")
-            # Placeholder wait to simulate work
-            time.sleep(5)
-            self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Done for {email_addr}\n")
-            try:
-                self.exec_success_count = getattr(self, 'exec_success_count', 0) + 1
-                self._update_exec_counters()
-            except Exception:
-                pass
+            time.sleep(1)
+            if attempt_success:
+                self._append_exec_log(f"[JOB #{job_id}] {time.strftime('%H:%M:%S')} | SUCCESS email={email_addr} (đủ ≥2 ảnh)\n")
+                try:
+                    self.exec_success_count = getattr(self, 'exec_success_count', 0) + 1
+                    self._update_exec_counters()
+                except Exception:
+                    pass
+            else:
+                self._append_exec_log(f"[JOB #{job_id}] {time.strftime('%H:%M:%S')} | FAILED email={email_addr} (không đủ ảnh kết quả)\n")
+                try:
+                    self.exec_error_count = getattr(self, 'exec_error_count', 0) + 1
+                    self._update_exec_counters()
+                except Exception:
+                    pass
         except Exception as ex:
             self._set_exec_status(f"Lỗi execute: {ex}", 'red')
             try:
@@ -1617,16 +1814,23 @@ class WhiskBrowserTool:
                 self._update_exec_counters()
             except Exception:
                 pass
+            try:
+                self._append_exec_log(f"[JOB #{job_id}] {time.strftime('%H:%M:%S')} | FAILED email={email_addr} error={str(ex)}\n")
+            except Exception:
+                pass
         finally:
             try:
+                # Keep driver alive for subsequent jobs; do not quit here
                 local_drv = self.exec_drivers.get(email_addr)
-                if local_drv is not None:
-                    local_drv.quit()
+                if not self._is_driver_alive(local_drv):
+                    # Clean up reference if it died unexpectedly
+                    if email_addr in self.exec_drivers:
+                        del self.exec_drivers[email_addr]
             except Exception:
                 pass
             try:
-                if email_addr in self.exec_drivers:
-                    del self.exec_drivers[email_addr]
+                # Do not remove alive driver; it will be reused for next job
+                pass
             except Exception:
                 pass
             # Auto-run next job if available
@@ -1642,9 +1846,26 @@ class WhiskBrowserTool:
                     else:
                         st['running'] = False
                 if next_job is not None:
-                    threading.Thread(target=self._execute_row_thread, args=(next_job['email'], next_job['meta'], next_job['row']), daemon=True).start()
+                    self._append_exec_log(f"[JOB #{next_job.get('job_id')}] {time.strftime('%H:%M:%S')} | Started for {next_job.get('email')}\n")
+                    threading.Thread(target=self._execute_row_thread, args=(next_job['email'], next_job['meta'], next_job['row'], next_job.get('job_id')), daemon=True).start()
                 else:
                     self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | All jobs completed for {email_addr}\n")
+                    # Close the browser for this account when there are no more queued jobs
+                    try:
+                        drv_to_close = self.exec_drivers.get(email_addr)
+                        if drv_to_close is not None:
+                            try:
+                                drv_to_close.quit()
+                            except Exception:
+                                pass
+                        # Remove reference so a new session is created next time
+                        self.exec_drivers.pop(email_addr, None)
+                        try:
+                            self._append_exec_log(f"[SYSTEM] {time.strftime('%H:%M:%S')} | Đã đóng browser cho {email_addr} (hết queue)\n")
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                 try:
                     self._update_exec_counters()
                 except Exception:
@@ -1749,6 +1970,7 @@ class WhiskBrowserTool:
             from tkinter import filedialog
             try:
                 from openpyxl import Workbook
+                from openpyxl.styles import NamedStyle
             except Exception:
                 messagebox.showerror("Thiếu thư viện", "Cần cài openpyxl để tạo template: pip install openpyxl")
                 return
@@ -1773,9 +1995,31 @@ class WhiskBrowserTool:
                 "size",  # allowed: 1:1, 9:16, 16:9, 3:4, 4:3
             ]
             ws.append(headers)
-            # Sample rows
+            
+            # Set size column (column F) to text format to preserve aspect ratio strings
+            try:
+                # Create a text style
+                text_style = NamedStyle(name="text_style")
+                text_style.number_format = '@'  # Text format
+                
+                # Apply text format to the entire size column (column F)
+                for row in range(2, 100):  # Apply to first 98 data rows
+                    cell = ws[f'F{row}']
+                    cell.number_format = '@'
+            except Exception:
+                pass
+            
+            # Sample rows with explicit string formatting for size column
             ws.append(["A hero shot product on clean background", "C:/images/p1.jpg", "C:/images/p2.jpg", "C:/images/screen.jpg", "C:/images/variantA.jpg", "1:1"]) 
             ws.append(["Street fashion look", "C:/images/a.jpg", "C:/images/b.jpg", "", "", "9:16"]) 
+            
+            # Ensure sample data size values are treated as text
+            try:
+                ws['F2'].number_format = '@'  # 1:1
+                ws['F3'].number_format = '@'  # 9:16
+            except Exception:
+                pass
+                
             wb.save(path)
             self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đã lưu template: {path}\n")
         except Exception as ex:
@@ -1826,8 +2070,8 @@ class WhiskBrowserTool:
                     'kind_image': get('kind_image'),
                     'size': get('size'),
                 }
-                # Basic validation: require at least one of main promt or image_1
-                if any(item.values()):
+                # Chỉ nhận các hàng có main promt (không rỗng)
+                if (item.get('main promt') or '').strip():
                     rows.append(item)
 
             if not rows:

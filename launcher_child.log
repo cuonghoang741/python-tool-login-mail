@@ -1,0 +1,93 @@
+[EXEC] 21:21:04 | Opening Flow page...
+[EXEC] 21:21:04 | Queued job for le@5-xyz.com (frames_to_video) from Excel
+[EXEC] 21:21:04 | Queued job for le@5-xyz.com (text_to_video) from Excel
+[EXEC] 21:21:04 | Imported 3 row(s) from Excel and dispatched to accounts.
+[EXEC] 21:21:09 | Chrome crash detected, đóng browser và thử lại... (lần 1/3)
+[EXEC] 21:21:13 | Chrome crash detected, đóng browser và thử lại... (lần 2/3)
+[EXEC] 21:21:18 | Execute error: Message: session not created: Chrome failed to start: crashed.
+  (session not created: DevToolsActivePort file doesn't exist)
+  (The process started from chrome location C:\Program Files\Google\Chrome\Application\chrome.exe is no longer running, so ChromeDriver is assuming that Chrome has crashed.); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#sessionnotcreatedexception
+Stacktrace:
+	GetHandleVerifier [0x0xa1fea3+66515]
+	GetHandleVerifier [0x0xa1fee4+66580]
+	(No symbol) [0x0x80dc48]
+	(No symbol) [0x0x843923]
+	(No symbol) [0x0x83ea2a]
+	(No symbol) [0x0x886ffc]
+	(No symbol) [0x0x8868fa]
+	(No symbol) [0x0x87afc6]
+	(No symbol) [0x0x84c2ca]
+	(No symbol) [0x0x84d154]
+	GetHandleVerifier [0x0xc773d3+2521347]
+	GetHandleVerifier [0x0xc72353+2500739]
+	GetHandleVerifier [0x0xa47cf4+229924]
+	GetHandleVerifier [0x0xa38258+165768]
+	GetHandleVerifier [0x0xa3ed0d+193085]
+	GetHandleVerifier [0x0xa281b8+100072]
+	GetHandleVerifier [0x0xa28350+100480]
+	GetHandleVerifier [0x0xa1260a+11066]
+	BaseThreadInitThunk [0x0x7697fcc9+25]
+	RtlGetAppContainerNamedObjectPath [0x0x77e882ae+286]
+	RtlGetAppContainerNamedObjectPath [0x0x77e8827e+238]
+
+[EXEC] 21:21:18 | Starting next queued job for le@5-xyz.com (frames_to_video)
+[EXEC] 21:21:18 | Opening Flow page...
+[EXEC] 21:21:23 | Chrome crash detected, đóng browser và thử lại... (lần 1/3)
+[EXEC] 21:21:28 | Chrome crash detected, đóng browser và thử lại... (lần 2/3)
+[EXEC] 21:21:33 | Execute error: Message: session not created: Chrome failed to start: crashed.
+  (session not created: DevToolsActivePort file doesn't exist)
+  (The process started from chrome location C:\Program Files\Google\Chrome\Application\chrome.exe is no longer running, so ChromeDriver is assuming that Chrome has crashed.); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#sessionnotcreatedexception
+Stacktrace:
+	GetHandleVerifier [0x0xa1fea3+66515]
+	GetHandleVerifier [0x0xa1fee4+66580]
+	(No symbol) [0x0x80dc48]
+	(No symbol) [0x0x843923]
+	(No symbol) [0x0x83ea2a]
+	(No symbol) [0x0x886ffc]
+	(No symbol) [0x0x8868fa]
+	(No symbol) [0x0x87afc6]
+	(No symbol) [0x0x84c2ca]
+	(No symbol) [0x0x84d154]
+	GetHandleVerifier [0x0xc773d3+2521347]
+	GetHandleVerifier [0x0xc72353+2500739]
+	GetHandleVerifier [0x0xa47cf4+229924]
+	GetHandleVerifier [0x0xa38258+165768]
+	GetHandleVerifier [0x0xa3ed0d+193085]
+	GetHandleVerifier [0x0xa281b8+100072]
+	GetHandleVerifier [0x0xa28350+100480]
+	GetHandleVerifier [0x0xa1260a+11066]
+	BaseThreadInitThunk [0x0x7697fcc9+25]
+	RtlGetAppContainerNamedObjectPath [0x0x77e882ae+286]
+	RtlGetAppContainerNamedObjectPath [0x0x77e8827e+238]
+
+[EXEC] 21:21:33 | Starting next queued job for le@5-xyz.com (text_to_video)
+[EXEC] 21:21:33 | Opening Flow page...
+[EXEC] 21:21:37 | Chrome crash detected, đóng browser và thử lại... (lần 1/3)
+[EXEC] 21:21:42 | Chrome crash detected, đóng browser và thử lại... (lần 2/3)
+[EXEC] 21:21:46 | Execute error: Message: session not created: Chrome failed to start: crashed.
+  (session not created: DevToolsActivePort file doesn't exist)
+  (The process started from chrome location C:\Program Files\Google\Chrome\Application\chrome.exe is no longer running, so ChromeDriver is assuming that Chrome has crashed.); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#sessionnotcreatedexception
+Stacktrace:
+	GetHandleVerifier [0x0xa1fea3+66515]
+	GetHandleVerifier [0x0xa1fee4+66580]
+	(No symbol) [0x0x80dc48]
+	(No symbol) [0x0x843923]
+	(No symbol) [0x0x83ea2a]
+	(No symbol) [0x0x886ffc]
+	(No symbol) [0x0x8868fa]
+	(No symbol) [0x0x87afc6]
+	(No symbol) [0x0x84c2ca]
+	(No symbol) [0x0x84d154]
+	GetHandleVerifier [0x0xc773d3+2521347]
+	GetHandleVerifier [0x0xc72353+2500739]
+	GetHandleVerifier [0x0xa47cf4+229924]
+	GetHandleVerifier [0x0xa38258+165768]
+	GetHandleVerifier [0x0xa3ed0d+193085]
+	GetHandleVerifier [0x0xa281b8+100072]
+	GetHandleVerifier [0x0xa28350+100480]
+	GetHandleVerifier [0x0xa1260a+11066]
+	BaseThreadInitThunk [0x0x7697fcc9+25]
+	RtlGetAppContainerNamedObjectPath [0x0x77e882ae+286]
+	RtlGetAppContainerNamedObjectPath [0x0x77e8827e+238]
+
+[EXEC] 21:21:46 | All jobs completed for le@5-xyz.com

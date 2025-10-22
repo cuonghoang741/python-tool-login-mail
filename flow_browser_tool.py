@@ -9,6 +9,7 @@ import random
 import threading
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -21,6 +22,14 @@ from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from openpyxl import load_workbook
+
+# Import story tab
+try:
+    from tabs.flow_tab_story import StoryPromptGenerator
+    _HAS_STORY_TAB = True
+except ImportError:
+    StoryPromptGenerator = None
+    _HAS_STORY_TAB = False
 
 
 # Optional modern theming with ttkbootstrap (for a significantly improved look)
@@ -300,8 +309,10 @@ class FlowBrowserTool:
         # Tabs
         login_tab = ttk.Frame(notebook)
         exec_tab = ttk.Frame(notebook)
+        story_tab = ttk.Frame(notebook)
         notebook.add(login_tab, text="🔐 Đăng nhập & Tài khoản")
         notebook.add(exec_tab, text="🎥 Execute Media")
+        notebook.add(story_tab, text="📚 All Story Prompts")
         # Mặc định chọn tab Execute Media
         notebook.select(1)
 
@@ -529,6 +540,14 @@ class FlowBrowserTool:
         self._attach_tooltip(btn_import, "Import Excel và đưa vào hàng đợi")
         self._attach_tooltip(btn_tpl, "Tải file template Excel")
 
+        # Quick toggle: Headless mode (visible in Execute tab)
+        try:
+            self.headless_mode_chk = ttk.Checkbutton(action_frame, text="Headless (ẩn browser)", variable=self.headless_mode)
+            self.headless_mode_chk.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
+            self._attach_tooltip(self.headless_mode_chk, "Chạy ẩn trình duyệt khi thực thi workflow")
+        except Exception:
+            pass
+
         self.exec_status = ttk.Label(ex, text="✅ Sẵn sàng", style='Success.TLabel')
         # Place status just below actions
         self.exec_status.grid(row=2, column=0, columnspan=2, sticky=tk.W)
@@ -614,6 +633,24 @@ class FlowBrowserTool:
         # Initialize jobs view
         self.exec_current_job = None
         self._refresh_jobs_view()
+
+        # ===== Story Tab =====
+        if _HAS_STORY_TAB and StoryPromptGenerator is not None:
+            try:
+                self.story_generator = StoryPromptGenerator(story_tab, self.ui_callbacks)
+            except Exception as e:
+                print(f"Failed to initialize story tab: {e}")
+                # Create a simple error message frame
+                error_frame = ttk.Frame(story_tab, padding="20")
+                error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+                ttk.Label(error_frame, text=f"❌ Lỗi khởi tạo Story Tab: {e}", 
+                         style='Error.TLabel').pack()
+        else:
+            # Create a simple message frame if story tab is not available
+            error_frame = ttk.Frame(story_tab, padding="20")
+            error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+            ttk.Label(error_frame, text="❌ Story Tab không khả dụng", 
+                     style='Error.TLabel').pack()
 
     # ===================== Responsive Helpers =====================
     def _on_window_resize(self, event):
@@ -779,6 +816,11 @@ class FlowBrowserTool:
         chrome_options.add_argument(f"--user-agent={ua}")
         chrome_options.add_argument("--lang=vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
         chrome_options.add_argument("--start-maximized")
+        # Đặt window-size để giảm lỗi DevToolsActivePort khi khởi tạo
+        try:
+            chrome_options.add_argument("--window-size=1920,1080")
+        except Exception:
+            pass
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_experimental_option("detach", True)
@@ -793,17 +835,44 @@ class FlowBrowserTool:
         except Exception:
             pass
         service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        try:
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        except Exception:
-            pass
-        # Bật Network domain để có thể lấy response body qua CDP
-        try:
-            driver.execute_cdp_cmd('Network.enable', {})
-        except Exception:
-            pass
-        return driver
+
+        # Retry logic khi Chrome crash/không tạo được session
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                try:
+                    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                except Exception:
+                    pass
+                # Bật Network domain để có thể lấy response body qua CDP
+                try:
+                    driver.execute_cdp_cmd('Network.enable', {})
+                except Exception:
+                    pass
+                return driver
+            except Exception as e:
+                msg = str(e).lower()
+                crash_like = (
+                    "chrome failed to start" in msg or
+                    "crashed" in msg or
+                    "session not created" in msg or
+                    "devtoolsactiveport" in msg
+                )
+                if crash_like and attempt < max_retries - 1:
+                    try:
+                        self._log_exec(f"Chrome crash detected, thử lại... (lần {attempt + 1}/{max_retries})")
+                    except Exception:
+                        pass
+                    # Chỉ dọn dẹp lock trong cache profile hiện tại, tránh đóng các Chrome khác
+                    try:
+                        self._cleanup_profile_locks(self.current_cache_dir)
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                    continue
+                # Hết retry hoặc lỗi không thuộc dạng crash -> ném lại lỗi
+                raise
 
     def _login_flow_browser_thread(self, email_addr: str) -> None:
         try:
@@ -945,7 +1014,8 @@ class FlowBrowserTool:
                 aspect_ratio = _cell_to_str(row[3]) if len(row) > 3 else ''
                 outputs = _cell_to_str(row[4]) if len(row) > 4 else ''
                 model = _cell_to_str(row[5]) if len(row) > 5 else ''
-                if wf:
+                # Skip rows with empty prompts (filter out empty records)
+                if wf and prompt.strip():
                     rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
             if not rows:
                 messagebox.showerror("Lỗi", "Không có dữ liệu hợp lệ trong file Excel!")
@@ -999,8 +1069,8 @@ class FlowBrowserTool:
 
             ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])  # header
             # three sample rows using valid options
+            ws.append(["frames_to_video", "Running", "C:\\Users\\admin\\Downloads\\Shop-quan-ao-nu-quan-9-Fs-store.jpg", ar_values[0] if len(ar_values) > 1 else ar_values[0], op_values[0], md_values[-1]])
             ws.append(["text_to_video", "A cinematic sunset over mountains", "", ar_values[0], op_values[-1], md_values[0]])
-            ws.append(["frames_to_video", "", "/absolute/path/to/frames/folder", ar_values[1] if len(ar_values) > 1 else ar_values[0], op_values[0], md_values[-1]])
             ws.append(["text_to_video", "A neon-lit cyberpunk city at night", "", ar_values[2] if len(ar_values) > 2 else ar_values[0], op_values[1] if len(op_values) > 1 else op_values[0], md_values[1] if len(md_values) > 1 else md_values[0]])
             wb.save(path)
             try:
@@ -1608,6 +1678,52 @@ class FlowBrowserTool:
         except Exception:
             pass
 
+    def _kill_chrome_processes(self) -> None:
+        """Đóng mọi tiến trình Chrome/ChromeDriver còn treo để chuẩn bị retry."""
+        try:
+            import subprocess
+            import platform
+            system = platform.system().lower()
+            if system == "windows":
+                try:
+                    subprocess.run(["taskkill", "/f", "/im", "chrome.exe"], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+                try:
+                    subprocess.run(["taskkill", "/f", "/im", "chromedriver.exe"], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+            elif system in ["linux", "darwin"]:
+                try:
+                    subprocess.run(["pkill", "-f", "chrome"], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+                try:
+                    subprocess.run(["pkill", "-f", "chromedriver"], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _cleanup_profile_locks(self, cache_dir: str | None) -> None:
+        """Xóa các file lock trong profile cache để giải phóng session của đúng email."""
+        try:
+            if not cache_dir:
+                return
+            candidates = [
+                os.path.join(cache_dir, "SingletonLock"),
+                os.path.join(cache_dir, "SingletonCookie"),
+                os.path.join(cache_dir, "SingletonSocket"),
+            ]
+            for fp in candidates:
+                try:
+                    if os.path.exists(fp):
+                        os.remove(fp)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
     def _is_google_signed_in(self, driver: webdriver.Chrome) -> bool:
         try:
             url = driver.current_url or ""
@@ -1646,6 +1762,11 @@ class FlowBrowserTool:
         if meta.get("user_agent"):
             chrome_options.add_argument(f"--user-agent={meta['user_agent']}")
         chrome_options.add_argument("--start-maximized")
+        # Thiết lập kích thước cửa sổ cố định giúp ổn định khởi tạo
+        try:
+            chrome_options.add_argument("--window-size=1920,1080")
+        except Exception:
+            pass
         chrome_options.add_argument("--lang=vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
         try:
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
@@ -1667,12 +1788,39 @@ class FlowBrowserTool:
         except Exception:
             pass
         service = Service(ChromeDriverManager().install())
-        drv = webdriver.Chrome(service=service, options=chrome_options)
-        try:
-            drv.execute_cdp_cmd('Network.enable', {})
-        except Exception:
-            pass
-        return drv
+
+        # Retry logic tương tự whisk khi Chrome crash
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                drv = webdriver.Chrome(service=service, options=chrome_options)
+                try:
+                    drv.execute_cdp_cmd('Network.enable', {})
+                except Exception:
+                    pass
+                return drv
+            except Exception as e:
+                msg = str(e).lower()
+                crash_like = (
+                    "chrome failed to start" in msg or
+                    "crashed" in msg or
+                    "session not created" in msg or
+                    "devtoolsactiveport" in msg
+                )
+                if crash_like and attempt < max_retries - 1:
+                    try:
+                        self._log_exec(f"Chrome crash detected, đóng browser và thử lại... (lần {attempt + 1}/{max_retries})")
+                    except Exception:
+                        pass
+                    # Dọn dẹp lock trong cache profile này thay vì đóng toàn bộ Chrome
+                    try:
+                        self._cleanup_profile_locks(cache_dir)
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                    continue
+                raise
+        
 
     def _open_selected_profile(self) -> None:
         try:
@@ -1876,8 +2024,6 @@ class FlowBrowserTool:
                     pass
         except Exception:
             pass
-        # Tk fallback
-        self._set_exec_status(message, color)
 
     def _append_exec_log(self, text: str) -> None:
         """Append text to the progress log textbox and auto-scroll to bottom."""
@@ -1954,7 +2100,6 @@ class FlowBrowserTool:
             # Append to error card
             self._append_error_log(line)
             # Also reflect on exec status area in red (non-blocking)
-            self._set_exec_status(message, 'red')
         except Exception:
             pass
 
@@ -1998,6 +2143,9 @@ class FlowBrowserTool:
 
     def _confirm_crop_and_wait_first_frame(self, driver: webdriver.Chrome) -> None:
         """Nhấn nút 'Cắt và lưu' và đợi đến khi phần tử 'Khung hình đầu tiên' xuất hiện (đã có ảnh)."""
+        # Wait a bit to ensure UI is ready before clicking crop button
+        time.sleep(2)
+        
         # Click nút Cắt và lưu (VI) hoặc 'Crop and save' (EN fallback)
         crop_candidates = [
             "//button[.//i[normalize-space(text())='crop'] and contains(., 'Cắt và lưu')]",
@@ -2008,6 +2156,8 @@ class FlowBrowserTool:
         for xp in crop_candidates:
             try:
                 el = driver.find_element(By.XPATH, xp)
+                # Đợi thêm 1s sau khi tìm thấy nút để đảm bảo UI đã sẵn sàng
+                time.sleep(1)
                 self._human_click_el(driver, el)
                 time.sleep(0.5)
                 break
@@ -2264,7 +2414,8 @@ class FlowBrowserTool:
         # Poll API bằng cách reload trang mỗi 10s, tối đa 3 phút, đến khi đủ media URL(s)
         start = time.time()
         last_reload = 0.0
-        collected_urls = set()
+        # Map normalized_url -> original_url (keep original with query params for authorized download)
+        collected_url_map = {}
         target_fragment = '/fx/api/trpc/project.searchProjectWorkflows'
 
         # Bật Network nếu cần (an toàn khi gọi nhiều lần)
@@ -2273,13 +2424,26 @@ class FlowBrowserTool:
         except Exception:
             pass
 
+        # Delay first reload by 60s, then reload every ~10s
+        initial_reload_delay = 60.0
+        notified_wait = False
+        retries_after_initial = 0
+        max_retries_after_initial = 3
+
         while True:
             if self.stop_exec:
                 self._log_exec("Stopped by user during monitoring")
                 return
 
             now = time.time()
-            if now - last_reload >= 10:
+            if (now - start) < initial_reload_delay:
+                if not notified_wait:
+                    try:
+                        self._log_exec("Waiting 60s before first reload to collect media...")
+                    except Exception:
+                        pass
+                    notified_wait = True
+            elif now - last_reload >= 10:
                 try:
                     self._log_exec("Reloading page to check TRPC API responses...")
                     driver.refresh()
@@ -2287,6 +2451,9 @@ class FlowBrowserTool:
                 except Exception:
                     pass
                 last_reload = now
+                # Count retries only after the initial 60s window
+                if (now - start) >= initial_reload_delay:
+                    retries_after_initial += 1
 
             # Đọc performance logs và thu thập response bodies của API mục tiêu
             try:
@@ -2318,20 +2485,37 @@ class FlowBrowserTool:
                         data = text
                     urls = self._extract_fife_uris_from_api_json(data)
                     for u in urls:
-                        collected_urls.add(u)
+                        try:
+                            norm = self._normalize_media_url(u)
+                        except Exception:
+                            norm = u
+                        if norm not in collected_url_map:
+                            collected_url_map[norm] = u
                 except Exception:
                     continue
 
-            self._log_exec(f"API media collected: {len(collected_urls)}/{expected_videos}")
+            self._log_exec(f"API media collected: {len(collected_url_map)}/{expected_videos}")
 
-            if len(collected_urls) >= expected_videos:
+            if len(collected_url_map) >= expected_videos:
+                break
+            # If we've passed the initial delay and exhausted retry attempts, proceed with whatever we have
+            if (time.time() - start) >= initial_reload_delay and retries_after_initial >= max_retries_after_initial:
+                self._log_exec("Max retries after initial wait reached. Proceeding with available media.")
                 break
             if time.time() - start >= 180:
                 self._log_exec("Timeout 3 minutes reached. Proceeding to download available media.")
                 break
             time.sleep(1)
 
-        all_urls = list(collected_urls)
+        # Use original URLs (with query) for actual download, but de-duplicated by normalized key
+        all_urls = list(collected_url_map.values())
+        # Limit to expected amount to avoid over-downloading due to variant URLs
+        try:
+            expected_videos = int((self.outputs_per_prompt.get() or "1").strip())
+            if expected_videos > 0:
+                all_urls = all_urls[:expected_videos]
+        except Exception:
+            pass
         if all_urls:
             self._log_exec(f"Found {len(all_urls)} media URL(s) from API. Downloading...")
             prompt_text = getattr(self, 'current_prompt', '')
@@ -2434,14 +2618,41 @@ class FlowBrowserTool:
                     while dest.exists() and attempt < 1000:
                         dest = out_dir / f"{ts}_media_{i}_{attempt}{ext}"
                         attempt += 1
-                    self._log_exec(f"Downloading {filename}...")
-                    urllib.request.urlretrieve(url, dest.as_posix())
+                    self._log_exec(f"Downloading {dest.name}...")
+                    # Build request with headers to avoid 403
+                    req = urllib.request.Request(url, headers={
+                        'User-Agent': self.current_user_agent or 'Mozilla/5.0',
+                        'Referer': 'https://labs.google/fx/tools/flow',
+                        'Accept': '*/*',
+                        'Connection': 'keep-alive',
+                    })
+                    # Simple retries for transient errors
+                    max_dl_retries = 3
+                    for r in range(max_dl_retries):
+                        try:
+                            with urllib.request.urlopen(req, timeout=30) as resp, open(dest, 'wb') as f:
+                                f.write(resp.read())
+                            break
+                        except Exception as e:
+                            if r == max_dl_retries - 1:
+                                raise e
+                            time.sleep(1.5)
                     self._log_exec(f"Downloaded {dest.name}", success=True)
                 except Exception as ex:
                     self._log_exec(f"Failed to download #{i}: {ex}", error=True)
             # No popup: silently finish; the outer finally will close browser and continue queue
         except Exception as ex:
             self._log_exec(f"Download error: {ex}", error=True)
+
+    def _normalize_media_url(self, url: str) -> str:
+        """Normalize media URL to avoid duplicates differing only by query/fragment.
+        Keeps scheme, netloc, and path. Strips query and fragment.
+        """
+        try:
+            parts = urlsplit(url)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+        except Exception:
+            return url
 
     def _open_settings_and_apply(self, driver: webdriver.Chrome, aspect: str, outputs: str, model: str) -> None:
         """Mở popover Cài đặt (tune) và đặt: Tỷ lệ khung hình, Outputs per prompt, Model."""
@@ -2922,9 +3133,33 @@ class FlowBrowserTool:
                 pass
 
     def _human_type_el(self, element, text: str) -> None:
-        for ch in text:
-            element.send_keys(ch)
-            time.sleep(random.uniform(0.02, 0.08))
+        """Type text into an element with a faster, chunked approach.
+        Falls back to per-char typing if chunked send fails.
+        """
+        try:
+            length = len(text or "")
+            if length == 0:
+                return
+            # Choose chunk size based on length for speed while keeping some human-like pacing
+            if length >= 200:
+                chunk_size = 50
+            elif length >= 80:
+                chunk_size = 25
+            else:
+                chunk_size = 10
+            for i in range(0, length, chunk_size):
+                chunk = text[i:i+chunk_size]
+                element.send_keys(chunk)
+                # very small jitter to avoid being instantaneous
+                time.sleep(random.uniform(0.001, 0.01))
+        except Exception:
+            # Fallback: per-character minimal delay
+            for ch in text:
+                try:
+                    element.send_keys(ch)
+                except Exception:
+                    continue
+                time.sleep(random.uniform(0.001, 0.01))
 
     # ===================== Status =====================
     def _set_status(self, text: str, color: str) -> None:

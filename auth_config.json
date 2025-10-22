@@ -1,0 +1,50 @@
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NCwiZW1haWwiOiIxQGdtYWlsLmNvbSIsImF1dGhUeXBlIjoiRU1BSUwiLCJyZWZyZXNoVG9rZW5JZCI6MjAsImlhdCI6MTc2MDg5NTMwNywiZXhwIjo1MDAwMDE3NjA4OTUzMDd9.QQF_jG0Wka0kycvwqTUTTeYg0LlGPuuwJ02ee9pk1p8",
+  "user": {
+    "message": "Success",
+    "statusCode": 200,
+    "result": {
+      "id": 4,
+      "name": "hc",
+      "email": "1@gmail.com",
+      "avatar": null,
+      "password": "$2a$10$WSQbOGqimiWjsDI23eNx..qtM789XUpTBD4Qdx6pzpdWDLy4HBs4a",
+      "googleId": null,
+      "authType": "EMAIL",
+      "lastSignIn": "2025-10-19T17:35:07.369Z",
+      "createdAt": "2025-10-19T17:20:05.949Z",
+      "updatedAt": "2025-10-19T17:35:07.371Z",
+      "deletedAt": null,
+      "activePackage": {
+        "id": 9,
+        "userId": 4,
+        "packageId": 1,
+        "status": "ACTIVE",
+        "startDate": "2025-10-19T17:20:05.976Z",
+        "endDate": "2025-11-19T17:20:05.976Z",
+        "createdAt": "2025-10-19T17:20:05.979Z",
+        "updatedAt": "2025-10-19T17:20:05.979Z",
+        "deletedAt": null,
+        "package": {
+          "id": 1,
+          "name": "Gói 1 tháng",
+          "description": "Gói sử dụng 1 tháng với đầy đủ tính năng",
+          "type": "MONTHLY_1",
+          "price": "99000",
+          "duration": 1,
+          "features": {
+            "quality": "HD",
+            "priority": "normal",
+            "maxDuration": "30s",
+            "videoGeneration": 100
+          },
+          "isActive": true,
+          "createdAt": "2025-10-19T16:29:26.569Z",
+          "updatedAt": "2025-10-19T16:29:35.389Z",
+          "deletedAt": null
+        }
+      }
+    }
+  },
+  "savedAt": 1760895307
+}

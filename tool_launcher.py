@@ -3,6 +3,31 @@ import os
 import subprocess
 import traceback
 import ctypes
+import json
+import threading
+import time
+
+# Force UTF-8 for stdio on Windows consoles to avoid cp1252 encode errors
+def _force_utf8_stdio() -> None:
+    try:
+        # Enable UTF-8 mode for this process
+        os.environ.setdefault('PYTHONUTF8', '1')
+        # Reconfigure stdio if possible (Python 3.7+)
+        if hasattr(sys.stdout, 'reconfigure'):
+            try:
+                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
+        if hasattr(sys.stderr, 'reconfigure'):
+            try:
+                sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+# Apply UTF-8 stdio configuration as early as possible
+_force_utf8_stdio()
 
 # Try to import tkinter early; show a native dialog if it's missing
 try:
@@ -19,6 +44,12 @@ except ModuleNotFoundError:
     except Exception:
         pass
     sys.exit(1)
+
+# HTTP client
+try:
+    import requests
+except Exception:
+    requests = None
 
 # Optional modern theming with ttkbootstrap
 try:
@@ -53,6 +84,313 @@ def _launch_whisk():
 
 
 _selected_launcher = None
+_is_authenticated = False
+_auth_token = None
+
+def _get_app_dir() -> str:
+    """Return a stable directory for app runtime files.
+
+    - In frozen/EXE: use the directory of the executable (next to .exe)
+    - In dev: use the project root (directory of this source file)
+    """
+    try:
+        if getattr(sys, 'frozen', False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        return os.getcwd()
+
+# Authentication configuration
+AUTH_CONFIG_FILE = os.path.join(_get_app_dir(), "auth_config.json")
+API_BASE_URL = "https://api-animo.airing.network/api"
+AUTH_ME_INTERVAL_SECONDS = 300  # 5 minutes
+
+_auth_monitor_thread = None
+_auth_monitor_running = False
+
+def load_auth_config():
+    """Load authentication configuration from file"""
+    try:
+        if os.path.exists(AUTH_CONFIG_FILE):
+            with open(AUTH_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def save_auth_config(config):
+    """Save authentication configuration to file"""
+    try:
+        with open(AUTH_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _get_auth_headers(token: str) -> dict:
+    return {"Authorization": f"Bearer {token}"}
+
+def authenticate_user(username, password):
+    """Authenticate user with API /login and return standardized result"""
+    if requests is None:
+        return {"success": False, "error": "Thiếu thư viện requests. Hãy cài đặt: pip install requests"}
+
+    # Fallback mode for testing (remove this when API is ready)
+    if username == "test" and password == "test123":
+        user_data = {
+            "email": "test@example.com",
+            "name": "Test User",
+            "package": "Premium",
+            "expiresAt": int(time.time()) + 30 * 24 * 3600  # 30 days from now
+        }
+        save_auth_config({
+            "accessToken": "test_token_123",
+            "user": user_data,
+            "savedAt": int(time.time())
+        })
+        return {
+            "success": True,
+            "token": "test_token_123",
+            "user": user_data,
+            "expires": None
+        }
+
+    try:
+        url = f"{API_BASE_URL}/auth/login"
+        payload = {"email": username, "password": password}
+        print(f"🌐 Making login request to: {url}")
+        print(f"📦 Payload: {payload}")
+        
+        resp = requests.post(url, json=payload, headers={"Accept": "application/json"}, timeout=10)
+        print(f"📡 Response status: {resp.status_code}")
+        
+        if resp.status_code >= 400:
+            print(f"❌ Login failed with status: {resp.status_code}")
+            try:
+                data = resp.json()
+                msg = data.get("message") or data.get("error") or resp.text
+            except Exception:
+                msg = resp.text
+            print(f"❌ Error message: {msg}")
+            return {"success": False, "error": msg or "Đăng nhập thất bại"}
+
+        data = resp.json() if resp.content else {}
+        print(f"📊 Login response data: {data}")
+        
+        # Parse nested structure: data.result.accessToken
+        result_data = data.get("result", {})
+        access_token = result_data.get("accessToken") or data.get("accessToken") or data.get("token")
+        user = result_data.get("user") or data.get("user")
+        
+        print(f"🔍 Extracted token: {access_token[:20] if access_token else 'None'}...")
+        print(f"🔍 Extracted user: {user}")
+        
+        if not access_token:
+            print("❌ No access token in response")
+            return {"success": False, "error": "Phản hồi đăng nhập không hợp lệ: thiếu accessToken"}
+
+        print(f"✅ Got access token: {access_token[:20]}...")
+
+        # Get user info from /me endpoint
+        try:
+            me_url = f"{API_BASE_URL}/user/me"
+            print(f"🌐 Making /me request to: {me_url}")
+            me_resp = requests.get(me_url, headers=_get_auth_headers(access_token), timeout=8)
+            print(f"📡 /me response status: {me_resp.status_code}")
+            
+            if me_resp.status_code == 200:
+                me_data = me_resp.json()
+                print(f"📊 /me response data: {me_data}")
+                user = me_data  # Use full user data from /me
+            else:
+                print(f"⚠️ /me failed with status: {me_resp.status_code}")
+        except Exception as e:
+            print(f"⚠️ /me failed: {e}")  # Debug info
+            pass  # Continue with basic user data if /me fails
+
+        print(f"💾 Saving auth config for user: {user}")
+        # Save immediately
+        save_auth_config({
+            "accessToken": access_token,
+            "user": user,
+            "savedAt": int(time.time())
+        })
+
+        result = {
+            "success": True,
+            "token": access_token,
+            "user": user or username,
+            "expires": None
+        }
+        print(f"✅ Final auth result: {result}")
+        return result
+    except requests.exceptions.ConnectionError:
+        print("❌ Connection error")
+        return {"success": False, "error": "Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng."}
+    except requests.exceptions.Timeout:
+        print("❌ Timeout error")
+        return {"success": False, "error": "Kết nối timeout. Vui lòng thử lại."}
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return {"success": False, "error": f"Lỗi: {str(e)}"}
+
+def _api_me(token: str):
+    if requests is None:
+        raise RuntimeError("Thiếu thư viện requests")
+    url = f"{API_BASE_URL}/user/me"
+    resp = requests.get(url, headers=_get_auth_headers(token), timeout=15)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"/me lỗi: {resp.status_code}")
+    return resp.json() if resp.content else {}
+
+def _check_package_expiration(user_data):
+    """Check if user package is expired"""
+    if not user_data:
+        return False, "Không có thông tin gói"
+    
+    print(f"🔍 Checking package expiration for user data: {user_data}")
+    
+    # Handle nested structure from /me API
+    exp_time = None
+    package_name = "Unknown"
+    
+    # Check if it's the nested structure from /me API
+    if isinstance(user_data, dict):
+        # Handle nested structure: user_data.result.activePackage
+        actual_user_data = user_data
+        if 'result' in user_data:
+            actual_user_data = user_data['result']
+            print(f"🔍 Found nested result structure, using: {actual_user_data}")
+        
+        # Check for activePackage structure
+        if 'activePackage' in actual_user_data:
+            active_pkg = actual_user_data['activePackage']
+            if isinstance(active_pkg, dict):
+                exp_time = active_pkg.get('endDate')
+                if 'package' in active_pkg:
+                    package_name = active_pkg['package'].get('name', 'Unknown')
+                    print(f"📦 Found package: {package_name}")
+        else:
+            # Check various possible expiration fields for direct structure
+            exp_fields = ['expiresAt', 'expires_at', 'expirationDate', 'expiration_date', 'exp', 'endDate']
+            for field in exp_fields:
+                if field in actual_user_data:
+                    exp_time = actual_user_data[field]
+                    break
+            
+            # Get package name from various fields
+            package_name = actual_user_data.get('package', actual_user_data.get('plan', 'Standard'))
+    
+    if not exp_time:
+        return True, "Không có thông tin hết hạn"
+    
+    print(f"📅 Expiration time: {exp_time}")
+    
+    try:
+        # Handle different time formats
+        if isinstance(exp_time, (int, float)):
+            exp_timestamp = exp_time
+        elif isinstance(exp_time, str):
+            # Try to parse ISO format or timestamp
+            import datetime
+            try:
+                # Handle ISO format with Z suffix
+                if exp_time.endswith('Z'):
+                    exp_timestamp = datetime.datetime.fromisoformat(exp_time.replace('Z', '+00:00')).timestamp()
+                else:
+                    exp_timestamp = datetime.datetime.fromisoformat(exp_time).timestamp()
+            except:
+                exp_timestamp = float(exp_time)
+        else:
+            return True, "Định dạng thời gian không hợp lệ"
+        
+        current_time = time.time()
+        if exp_timestamp <= current_time:
+            return False, "Gói đã hết hạn"
+        
+        # Calculate days remaining
+        days_left = (exp_timestamp - current_time) / (24 * 3600)
+        if days_left <= 7:
+            return True, f"Còn {int(days_left)} ngày"
+        else:
+            return True, f"Còn {int(days_left)} ngày"
+            
+    except Exception as e:
+        print(f"❌ Error parsing expiration: {e}")
+        return True, f"Lỗi kiểm tra hết hạn: {str(e)}"
+
+def check_existing_auth():
+    """Validate stored token via /me."""
+    global _is_authenticated, _auth_token
+    config = load_auth_config()
+    token = config.get('accessToken') or config.get('token')
+    if not token:
+        return False
+    try:
+        _ = _api_me(token)
+        _is_authenticated = True
+        _auth_token = token
+        return True
+    except Exception:
+        return False
+
+def _start_auth_monitor(root):
+    """Start background thread to call /me every 5 minutes. Logout on failure."""
+    global _auth_monitor_thread, _auth_monitor_running
+    if _auth_monitor_running:
+        return
+    _auth_monitor_running = True
+
+    def monitor():
+        global _auth_monitor_running
+        while _auth_monitor_running:
+            time.sleep(AUTH_ME_INTERVAL_SECONDS)
+            cfg = load_auth_config()
+            token = cfg.get('accessToken') or cfg.get('token')
+            if not token:
+                continue
+            try:
+                user_data = _api_me(token)
+                # Check package expiration
+                is_valid, exp_msg = _check_package_expiration(user_data)
+                if not is_valid:
+                    def do_logout():
+                        try:
+                            messagebox.showerror("Gói hết hạn", f"Gói của bạn đã hết hạn!\n{exp_msg}\nSẽ đăng xuất.")
+                        except Exception:
+                            pass
+                        try:
+                            logout()
+                            root.quit()
+                            # Restart the application
+                            main()
+                        except Exception:
+                            pass
+                    try:
+                        root.after(0, do_logout)
+                    except Exception:
+                        pass
+                    break
+            except Exception as e:
+                def do_logout():
+                    try:
+                        messagebox.showerror("Phiên đăng nhập hết hạn", "Token không còn hợp lệ. Sẽ đăng xuất.")
+                    except Exception:
+                        pass
+                    try:
+                        logout()
+                        root.quit()
+                        # Restart the application
+                        main()
+                    except Exception:
+                        pass
+                try:
+                    root.after(0, do_logout)
+                except Exception:
+                    pass
+                break
+
+    _auth_monitor_thread = threading.Thread(target=monitor, daemon=True)
+    _auth_monitor_thread.start()
 
 
 def _prepare_tcl_env_for_current_process() -> None:
@@ -101,8 +439,14 @@ def _spawn_tool(entry: str) -> None:
     """
     try:
         # Resolve paths and preferred interpreter
-        script_path = os.path.abspath(__file__)
-        project_root = os.path.dirname(script_path)
+        # Determine a stable working directory for the child process
+        # Use the executable directory when frozen; otherwise use project root from this file
+        if getattr(sys, 'frozen', False):
+            project_root = os.path.dirname(sys.executable)
+            script_path = os.path.join(project_root, 'tool_launcher.py')
+        else:
+            script_path = os.path.abspath(__file__)
+            project_root = os.path.dirname(script_path)
 
         # On Windows: if we're in a venv, prefer launching with that Python
         # to mirror the successful `--entry=...` CLI behavior. Otherwise,
@@ -113,7 +457,7 @@ def _spawn_tool(entry: str) -> None:
                 in_venv = hasattr(sys, 'base_prefix') and sys.prefix != sys.base_prefix
             except Exception:
                 in_venv = False
-            exe_path = os.path.join(project_root, 'dist', 'GoogleFlowTool.exe')
+            exe_path = os.path.join(project_root, 'dist', 'GoogleFlowTool', 'GoogleFlowTool.exe')
             if not getattr(sys, 'frozen', False) and in_venv:
                 venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
                 python_exec = venv_py_win if os.path.exists(venv_py_win) else sys.executable
@@ -253,8 +597,304 @@ def _spawn_and_quit(root, entry: str) -> None:
         except Exception:
             pass
 
+def show_login_form():
+    """Show login form window"""
+    global _is_authenticated, _auth_token
+    
+    # Check if already authenticated
+    if check_existing_auth():
+        return True
+    
+    login_root = None
+    login_success = False
+    auth_result = None
+    auth_error = None
+    auth_processed = False
+    
+    def on_login():
+        nonlocal login_success
+        print("🔐 Login button clicked")
+        username = username_entry.get().strip()
+        password = password_entry.get()
+        
+        print(f"📝 Username: {username}")
+        print(f"🔑 Password length: {len(password)}")
+        
+        if not username:
+            print("❌ No username provided")
+            messagebox.showerror("Lỗi", "Vui lòng nhập tên đăng nhập")
+            return
+        
+        if not password:
+            print("❌ No password provided")
+            messagebox.showerror("Lỗi", "Vui lòng nhập mật khẩu")
+            return
+        
+        print("✅ Input validation passed")
+        
+        # Disable login button during authentication
+        print("🔄 Disabling login button...")
+        login_btn.config(state='disabled', text='Đang đăng nhập...')
+        login_root.update()
+        print("✅ Login button disabled")
+        
+        def auth_thread():
+            nonlocal login_success, auth_result, auth_error
+            print("🧵 Starting auth thread...")
+            try:
+                print("🌐 Calling authenticate_user...")
+                result = authenticate_user(username, password)
+                print(f"📊 Auth result: {result}")
+                
+                # Set result flag instead of calling UI directly
+                auth_result = result
+                print("✅ Auth result set")
+                        
+            except Exception as e:
+                print(f"❌ Auth thread error: {e}")
+                auth_error = str(e)
+                print("✅ Auth error set")
+        
+        print("🚀 Starting auth thread...")
+        threading.Thread(target=auth_thread, daemon=True).start()
+        print("✅ Auth thread started")
+        
+        # Poll for auth result in main thread
+        def check_auth_result():
+            nonlocal login_success, auth_processed
+            if auth_processed:
+                return  # Already processed, stop polling
+            
+            if auth_result is not None:
+                print("📨 Processing auth result in main thread")
+                auth_processed = True
+                handle_auth_result(auth_result)
+                return
+            elif auth_error is not None:
+                print("❌ Processing auth error in main thread")
+                auth_processed = True
+                handle_auth_error(auth_error)
+                return
+            else:
+                # Continue polling
+                login_root.after(100, check_auth_result)
+        
+        # Start polling
+        login_root.after(100, check_auth_result)
+    
+    def handle_auth_result(result):
+        nonlocal login_success
+        print("📨 handle_auth_result called")
+        print(f"📊 Result: {result}")
+        login_btn.config(state='normal', text='Đăng nhập')
+        print("✅ Login button re-enabled")
+        
+        if result['success']:
+            print("🎉 Login successful!")
+            global _auth_token
+            _auth_token = result['token']
+            _is_authenticated = True
+            
+            # Save auth config
+            save_auth_config({
+                'accessToken': result['token'],
+                'user': result['user'],
+                'savedAt': int(time.time())
+            })
+            
+            # Check package expiration
+            user_data = result['user']
+            is_valid, exp_msg = _check_package_expiration(user_data)
+            
+            if not is_valid:
+                messagebox.showerror("Gói hết hạn", f"Gói của bạn đã hết hạn!\n{exp_msg}\nVui lòng gia hạn để tiếp tục sử dụng.")
+                logout()
+                return
+            
+            # Show success message with package info
+            user_name = "User"
+            package_name = "Unknown"
+            
+            if isinstance(user_data, dict):
+                # Handle nested structure: user_data.result.activePackage
+                actual_user_data = user_data
+                if 'result' in user_data:
+                    actual_user_data = user_data['result']
+                
+                # Handle nested structure from /me API
+                if 'activePackage' in actual_user_data:
+                    active_pkg = actual_user_data['activePackage']
+                    if isinstance(active_pkg, dict) and 'package' in active_pkg:
+                        package_name = active_pkg['package'].get('name', 'Unknown')
+                        package_info = package_name
+                    else:
+                        package_info = package_name
+                else:
+                    package_name = actual_user_data.get('package', actual_user_data.get('plan', 'Standard'))
+                    package_info = package_name
+                
+                user_name = actual_user_data.get('name', actual_user_data.get('email', 'User'))
+            else:
+                package_info = str(user_data)
+            
+            success_msg = f"Đăng nhập thành công!\n\n👤 Chào mừng: {user_name}\n📦 Gói: {package_info}\n⏰ Trạng thái: {exp_msg}"
+            
+            if "Còn" in exp_msg and int(exp_msg.split()[1]) <= 7:
+                success_msg += "\n\n⚠️ Cảnh báo: Gói sắp hết hạn!"
+            
+            messagebox.showinfo("Thành công", success_msg)
+            login_success = True
+            login_root.destroy()
+        else:
+            print("❌ Login failed")
+            messagebox.showerror("Lỗi đăng nhập", result.get('error', 'Đăng nhập thất bại'))
+            print("✅ Error dialog shown")
+    
+    def handle_auth_error(error_msg):
+        print(f"❌ handle_auth_error called: {error_msg}")
+        login_btn.config(state='normal', text='Đăng nhập')
+        print("✅ Login button re-enabled after error")
+        messagebox.showerror("Lỗi", f"Lỗi kết nối: {error_msg}")
+        print("✅ Error dialog shown")
+    
+    def on_cancel():
+        login_root.destroy()
+    
+    def on_key_press(event):
+        if event.keysym == 'Return':
+            on_login()
+        elif event.keysym == 'Escape':
+            on_cancel()
+    
+    # Create login window
+    login_root = tk.Toplevel()
+    login_root.title("🔐 Đăng nhập")
+    login_root.geometry("600x420")
+    login_root.resizable(False, False)
+    login_root.grab_set()  # Modal window
+    
+    # Center the window
+    login_root.update_idletasks()
+    x = (login_root.winfo_screenwidth() // 2) - (600 // 2)
+    y = (login_root.winfo_screenheight() // 2) - (420 // 2)
+    login_root.geometry(f"600x420+{x}+{y}")
+    
+    # Container
+    container = ttk.Frame(login_root, padding="30")
+    container.pack(fill=tk.BOTH, expand=True)
+    
+    # Title
+    title = ttk.Label(container, text="🔐 Đăng nhập hệ thống", font=("Segoe UI", 16, "bold"))
+    title.pack(pady=(0, 12))
+
+    # Single-device warning
+    warning_text = (
+        "Lưu ý: Mỗi tài khoản chỉ được đăng nhập trên 1 thiết bị tại 1 thời điểm.\n"
+        "Nếu đăng nhập ở thiết bị khác, phiên hiện tại sẽ bị đăng xuất."
+    )
+    warning_label = ttk.Label(
+        container,
+        text=warning_text,
+        foreground="#B91C1C",  # red-700
+        font=("Segoe UI", 10, "bold"),
+        justify=tk.CENTER
+    )
+    warning_label.pack(pady=(0, 16))
+    
+    # Username frame
+    username_frame = ttk.Frame(container)
+    username_frame.pack(fill=tk.X, pady=(0, 15))
+    
+    username_label = ttk.Label(username_frame, text="Tên đăng nhập:", font=("Segoe UI", 10))
+    username_label.pack(anchor=tk.W)
+    
+    username_entry = ttk.Entry(username_frame, font=("Segoe UI", 11), width=30)
+    username_entry.pack(fill=tk.X, pady=(5, 0))
+    username_entry.focus()
+    
+    # Password frame
+    password_frame = ttk.Frame(container)
+    password_frame.pack(fill=tk.X, pady=(0, 20))
+    
+    password_label = ttk.Label(password_frame, text="Mật khẩu:", font=("Segoe UI", 10))
+    password_label.pack(anchor=tk.W)
+    
+    password_entry = ttk.Entry(password_frame, font=("Segoe UI", 11), width=30, show="*")
+    password_entry.pack(fill=tk.X, pady=(5, 0))
+    
+    # Buttons frame
+    buttons_frame = ttk.Frame(container)
+    buttons_frame.pack(fill=tk.X, pady=(10, 0))
+    
+    login_btn = ttk.Button(buttons_frame, text="Đăng nhập", command=on_login, width=15)
+    login_btn.pack(side=tk.LEFT, padx=(0, 10))
+    
+    cancel_btn = ttk.Button(buttons_frame, text="Hủy", command=on_cancel, width=15)
+    cancel_btn.pack(side=tk.LEFT)
+    
+    # Bind keyboard events
+    login_root.bind('<KeyPress>', on_key_press)
+    username_entry.bind('<KeyPress>', on_key_press)
+    password_entry.bind('<KeyPress>', on_key_press)
+    
+    # Info text
+    info_text = ttk.Label(container, text="Nhấn Enter để đăng nhập, Esc để hủy", 
+                         font=("Segoe UI", 9), foreground="#666666")
+    info_text.pack(pady=(12, 0))
+
+    # Brand & contact
+    brand_contact = ttk.Label(container, text="ANIMTECH • Zalo: 0966515665", 
+                              font=("Segoe UI", 9, "bold"), foreground="#4B5563")
+    brand_contact.pack(pady=(8, 0))
+    
+    # Wait for window to close
+    login_root.wait_window()
+    
+    return login_success
+
+
+def logout():
+    """Logout user and clear authentication"""
+    global _is_authenticated, _auth_token
+    _is_authenticated = False
+    _auth_token = None
+    
+    # Clear saved auth config
+    try:
+        if os.path.exists(AUTH_CONFIG_FILE):
+            os.remove(AUTH_CONFIG_FILE)
+    except Exception:
+        pass
+    
+    messagebox.showinfo("Đăng xuất", "Đã đăng xuất thành công!")
+
+def _show_about():
+    try:
+        messagebox.showinfo(
+            "About ANIMTECH",
+            (
+                "ANIMTECH\n\n"
+                "Công ty công nghệ đồ họa tiên phong phát triển bộ công cụ AI \n"
+                "giúp tự động hóa toàn bộ quy trình làm phim: từ tiền kỳ (ý tưởng, kịch bản, \n"
+                "storyboard), sản xuất (tạo hình, compositing, motion), đến hậu kỳ \n"
+                "(âm thanh, grading, QC).\n\n"
+                "Sứ mệnh của chúng tôi là tăng tốc 10x thời gian sản xuất, giảm mạnh chi phí, \n"
+                "đồng thời duy trì chất lượng điện ảnh ở chuẩn cao nhất thông qua pipeline \n"
+                "thông minh, realtime và bảo mật cấp doanh nghiệp.\n\n"
+                "Năng lực cốt lõi: mô hình AI tùy biến theo dự án, tích hợp sâu với DCC \n"
+                "(Blender, After Effects, v.v.), render phân tán, theo dõi chất lượng \n"
+                "tự động và khả năng mở rộng linh hoạt cho studio mọi quy mô.\n\n"
+                "Liên hệ: Zalo 0966515665"
+            )
+        )
+    except Exception:
+        pass
 
 def main() -> None:
+    # Check authentication first
+    if not show_login_form():
+        return  # User cancelled login
+    
     # Prepare Tcl env on Windows before creating any Tk root
     _prepare_tcl_env_for_current_process()
     # Prefer ttkbootstrap if available for a nicer UI
@@ -280,27 +920,27 @@ def main() -> None:
             pass
 
     root.title("🔧 Tool Launcher")
-    root.geometry("420x220")
+    root.geometry("500x350")
     root.resizable(False, False)
 
     # Container
-    container = ttk.Frame(root, padding="20")
+    container = ttk.Frame(root, padding="30")
     container.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
     # Title
-    title = ttk.Label(container, text="Chọn công cụ", font=("Segoe UI", 16, "bold"))
-    title.grid(row=0, column=0, columnspan=2, pady=(0, 16))
+    title = ttk.Label(container, text="Chọn công cụ", font=("Segoe UI", 18, "bold"))
+    title.grid(row=0, column=0, columnspan=2, pady=(0, 20))
 
     # Buttons
     btn_flow = ttk.Button(
         container,
         text="🎬 Veo3",
         command=lambda: _spawn_and_quit(root, 'flow'),
-        width=24
+        width=28
     )
-    btn_flow.grid(row=1, column=0, padx=8, pady=8, sticky=(tk.W, tk.E))
+    btn_flow.grid(row=1, column=0, padx=12, pady=12, sticky=(tk.W, tk.E))
 
     def _coming_soon(name: str):
         try:
@@ -312,29 +952,69 @@ def main() -> None:
         container,
         text="🥣 Whisk",
         command=lambda: _spawn_and_quit(root, 'whisk'),
-        width=24
+        width=28
     )
-    btn_whisk.grid(row=1, column=1, padx=8, pady=8, sticky=(tk.W, tk.E))
+    btn_whisk.grid(row=1, column=1, padx=12, pady=12, sticky=(tk.W, tk.E))
 
     btn_pokecut = ttk.Button(
         container,
         text="✂️ Pokecut (coming soon)",
         command=lambda: _coming_soon("Pokecut"),
-        width=24
+        width=28
     )
-    btn_pokecut.grid(row=2, column=0, columnspan=2, padx=8, pady=8, sticky=(tk.W, tk.E))
+    btn_pokecut.grid(row=2, column=0, columnspan=2, padx=12, pady=12, sticky=(tk.W, tk.E))
 
     # Info
     info = ttk.Label(
         container,
         text="Veo3/Whisk đã sẵn sàng. Pokecut đang phát triển.",
-        foreground="#9AA4AF"
+        foreground="#9AA4AF",
+        font=("Segoe UI", 11)
     )
-    info.grid(row=3, column=0, columnspan=2, pady=(12, 0))
+    info.grid(row=3, column=0, columnspan=2, pady=(16, 0))
+
+    # Brand & contact
+    brand = ttk.Label(
+        container,
+        text="ANIMTECH • Zalo: 0966515665",
+        foreground="#4B5563",
+        font=("Segoe UI", 10, "bold")
+    )
+    brand.grid(row=4, column=0, columnspan=2, pady=(8, 0))
+
+    # About Us button
+    btn_about = ttk.Button(
+        container,
+        text="ℹ️ About Us",
+        command=_show_about,
+        width=28
+    )
+    btn_about.grid(row=5, column=0, columnspan=2, padx=12, pady=(12, 0), sticky=(tk.W, tk.E))
+    
+    # Logout button
+    def logout_and_restart():
+        logout()
+        root.quit()
+        # Restart the application
+        main()
+    
+    logout_btn = ttk.Button(
+        container,
+        text="🚪 Đăng xuất",
+        command=logout_and_restart,
+        width=28
+    )
+    logout_btn.grid(row=6, column=0, columnspan=2, padx=12, pady=(12, 0), sticky=(tk.W, tk.E))
 
     # Expand columns
     for i in range(2):
         container.columnconfigure(i, weight=1)
+
+    # Start auth monitor
+    try:
+        _start_auth_monitor(root)
+    except Exception:
+        pass
 
     root.mainloop()
 
@@ -345,6 +1025,18 @@ if __name__ == "__main__":
     if entry_arg:
         entry = entry_arg.split("=", 1)[1]
         try:
+            # Check authentication for CLI mode too
+            if not check_existing_auth():
+                print("Vui lòng đăng nhập trước khi sử dụng công cụ.")
+                # Try to show login form
+                try:
+                    _prepare_tcl_env_for_current_process()
+                    if not show_login_form():
+                        sys.exit(1)
+                except Exception:
+                    print("Không thể hiển thị form đăng nhập. Vui lòng chạy tool_launcher.py để đăng nhập.")
+                    sys.exit(1)
+            
             if entry == 'flow':
                 _launch_flow()
             elif entry == 'gmail':
