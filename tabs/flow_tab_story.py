@@ -105,44 +105,59 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
         
-        self.generate_btn = ttk.Button(button_frame, text="🎬 Tạo Story + Nhân Vật", 
+        self.generate_btn = ttk.Button(button_frame, text="🎬 Tạo Story Prompts", 
                                      command=self._generate_story_prompts, 
                                      style='Accent.TButton')
         self.generate_btn.grid(row=0, column=0, padx=(0, 10))
         
-        self.character_btn = ttk.Button(button_frame, text="👤 Tạo Nhân Vật", 
-                                      command=self._generate_character_prompts, 
-                                      style='Secondary.TButton')
-        self.character_btn.grid(row=0, column=1, padx=(0, 10))
-        
-        self.template_btn = ttk.Button(button_frame, text="⬇️ Tải Template", 
-                                     command=self._download_excel_template, 
-                                     style='Secondary.TButton')
-        self.template_btn.grid(row=0, column=2, padx=(0, 10))
         
         self.export_btn = ttk.Button(button_frame, text="📥 Export Excel", 
                                    command=self._export_to_excel, 
                                    style='Secondary.TButton')
-        self.export_btn.grid(row=0, column=3, padx=(0, 10))
+        self.export_btn.grid(row=0, column=1, padx=(0, 10))
         
         self.clear_btn = ttk.Button(button_frame, text="🗑️ Xóa tất cả", 
                                    command=self._clear_all, 
                                    style='Secondary.TButton')
-        self.clear_btn.grid(row=0, column=4)
+        self.clear_btn.grid(row=0, column=2, padx=(0, 10))
+        
+        # Execute button to transfer to execute tab
+        self.execute_btn = ttk.Button(button_frame, text="🚀 Execute", 
+                                     command=self._execute_story_prompts, 
+                                     style='Accent.TButton',
+                                     state='disabled')
+        self.execute_btn.grid(row=0, column=3, padx=(10, 0))
         
         # Status
-        self.status_label = ttk.Label(main_frame, text="✅ Sẵn sàng tạo story prompts với nhân vật", 
+        self.status_label = ttk.Label(main_frame, text="✅ Sẵn sàng tạo story prompts", 
                                     style='Success.TLabel')
         self.status_label.grid(row=4, column=0, columnspan=2, sticky=tk.W)
         
+        # Character prompts edit section
+        character_frame = ttk.LabelFrame(main_frame, text="👤 Nhân Vật (Có thể chỉnh sửa)", padding="10")
+        character_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(10, 0))
+        character_frame.configure(style='Card.TLabelframe')
+        character_frame.columnconfigure(0, weight=1)
+        character_frame.rowconfigure(1, weight=1)
+        
+        ttk.Label(character_frame, text="Mô tả các nhân vật:", 
+                 font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        
+        self.character_text = scrolledtext.ScrolledText(character_frame, height=4, wrap=tk.WORD,
+                                                       bg='#1B222C', fg='#EAECEF', 
+                                                       insertbackground='#EAECEF',
+                                                       highlightthickness=1, 
+                                                       highlightbackground='#2A2F3A')
+        self.character_text.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        
         # Results display
         results_frame = ttk.LabelFrame(main_frame, text="📋 Kết quả Story Prompts", padding="10")
-        results_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(10, 0))
+        results_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(10, 0))
         results_frame.configure(style='Card.TLabelframe')
         results_frame.columnconfigure(0, weight=1)
         results_frame.rowconfigure(0, weight=1)
         
-        self.results_text = scrolledtext.ScrolledText(results_frame, height=12, wrap=tk.WORD,
+        self.results_text = scrolledtext.ScrolledText(results_frame, height=8, wrap=tk.WORD,
                                                     state='disabled', bg='#10141B', fg='#EAECEF',
                                                     insertbackground='#EAECEF',
                                                     highlightthickness=1, 
@@ -150,7 +165,10 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         self.results_text.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         
         # Make results area expandable
-        main_frame.rowconfigure(5, weight=1)
+        main_frame.rowconfigure(6, weight=1)
+        
+        # Bind character text changes to update character prompts
+        self.character_text.bind('<KeyRelease>', self._on_character_text_change)
         
         # Store generated prompts
         self.generated_prompts = []
@@ -190,38 +208,51 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
             self._update_status("🔄 Đang tạo mô tả nhân vật...", "orange")
             self.generate_btn.config(state="disabled")
             
-            # First, generate character descriptions if not already available
-            if not self.character_prompts:
-                self._update_status("🔄 Đang tạo mô tả nhân vật...", "orange")
-                character_prompt = f"""
-Bạn là một chuyên gia tạo mô tả nhân vật cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo 3-5 mô tả chi tiết về ngoại hình nhân vật chính.
+            # Generate character descriptions
+            self._update_status("🔄 Đang tạo mô tả nhân vật...", "orange")
+            character_prompt = f"""
+Bạn là một chuyên gia tạo mô tả nhân vật cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo 4-6 mô tả CỰC KỲ CHI TIẾT về các nhân vật khác nhau trong câu chuyện.
 
-Yêu cầu:
-- Mỗi mô tả phải ngắn gọn (dưới 15 từ)
-- Tập trung vào ngoại hình: màu tóc, màu mắt, trang phục, đặc điểm nổi bật
-- Sử dụng từ ngữ sinh động, có tính hình ảnh
+YÊU CẦU MÔ TẢ CỰC KỲ CHI TIẾT (40-60 từ mỗi nhân vật):
+- HÌNH DÁNG: Chiều cao chính xác, vóc dáng cụ thể (gầy gò, mập mạp, cao lênh khênh, thấp lùn, v.v.)
+- KÍCH THƯỚC: So sánh cụ thể (to như gấu, nhỏ như chuột, trung bình như người bình thường)
+- MÀU SẮC: Màu tóc chính xác (vàng óng, nâu sẫm, đen nhánh), màu da (trắng hồng, nâu vàng, đen bóng), màu mắt (xanh dương, nâu đậm, xanh lá), màu quần áo (đỏ thẫm, xanh navy, trắng tinh)
+- MẮT: Màu mắt cụ thể, hình dáng mắt (to tròn, nhỏ híp, dài xếch), biểu cảm (tinh nghịch, buồn bã, kiên định, sợ hãi)
+- QUẦN ÁO: Loại trang phục chi tiết (áo sơ mi trắng, váy dài xanh, quần jean xanh, áo khoác da đen), màu sắc cụ thể, phong cách (thanh lịch, bụi bặm, sang trọng, giản dị)
+- ĐẶC ĐIỂM NỔI BẬT: Râu (râu dài bạc, ria mép đen), tóc (tóc dài xoăn, tóc ngắn thẳng), phụ kiện (kính mắt, nhẫn vàng, vòng cổ bạc), vết sẹo, nốt ruồi, v.v.
+- TUỔI TÁC: Trẻ (20-30), già (60-80), trung niên (40-50), thiếu niên (13-18), trẻ em (5-12)
+- TÍNH CÁCH: Thể hiện qua ngoại hình (kiên định, nhút nhát, mạnh mẽ, dịu dàng)
+- Ghi rõ ai là nhân vật chính
+- TẠO RA NHIỀU NHÂN VẬT KHÁC NHAU (nhân vật chính, nhân vật phụ, động vật, v.v.)
+- Mỗi mô tả phải dài 40-60 từ để CỰC KỲ CHI TIẾT
+- Sử dụng từ ngữ sinh động, có tính hình ảnh, cụ thể
 - Phù hợp với phong cách câu chuyện: {self.story_style.get()}
-- Mỗi mô tả phải khác nhau về góc nhìn hoặc đặc điểm
+- Mỗi nhân vật phải có đặc điểm riêng biệt và dễ phân biệt
+- Bao gồm cả nhân vật chính và nhân vật phụ nếu câu chuyện có
 
 Câu chuyện gốc:
 {story_text}
 
-Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một dòng, không đánh số thứ tự.
+Hãy trả về danh sách 4-6 mô tả nhân vật CỰC KỲ CHI TIẾT khác nhau, mỗi mô tả trên một dòng, không đánh số thứ tự.
 """
-                
-                # Generate character descriptions
-                character_response = self.model.generate_content(character_prompt)
-                character_text = character_response.text.strip()
-                
-                # Parse character prompts
-                character_prompts = []
-                for line in character_text.split('\n'):
-                    line = line.strip()
-                    if line and not line.isdigit():
-                        character_prompts.append(line)
-                
-                self.character_prompts = character_prompts
-                self._update_status("🔄 Đang tạo story prompts...", "orange")
+            
+            # Generate character descriptions
+            character_response = self.model.generate_content(character_prompt)
+            character_text = character_response.text.strip()
+            
+            # Parse character prompts
+            character_prompts = []
+            for line in character_text.split('\n'):
+                line = line.strip()
+                if line and not line.isdigit():
+                    character_prompts.append(line)
+            
+            self.character_prompts = character_prompts
+            
+            # Update character text area
+            self._update_character_text_area()
+            
+            self._update_status("🔄 Đang tạo story prompts...", "orange")
             
             # Now generate story prompts
             style = self.story_style.get()
@@ -229,7 +260,8 @@ Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một 
 Bạn là một chuyên gia tạo prompt cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo {num_prompts} prompt ngắn gọn và hấp dẫn cho việc tạo video.
 
 Yêu cầu:
-- Mỗi prompt phải là một câu hoặc cụm từ ngắn gọn (dưới 20 từ)
+- Mỗi prompt phải bắt đầu bằng "Chỉ sử dụng nhân vật: [tên nhân vật 1, tên nhân vật 2, ...], " sau đó mới là nội dung câu chuyện
+- Mỗi prompt phải là một câu mô tả câu chuyện, hoặc lời thoại nếu có
 - Tập trung vào phong cách: {style}
 - Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện
 - Sử dụng từ ngữ sinh động, có tính hình ảnh
@@ -277,23 +309,26 @@ Mỗi prompt trên một dòng, không đánh số.
             print(f"DEBUG: Character prompts: {self.character_prompts}")
             print(f"DEBUG: Story prompts: {story_prompts}")
             
+            # Get all character descriptions as a single prefix
+            character_prefix = ""
+            if self.character_prompts:
+                character_prefix = ", ".join(self.character_prompts) + ", "
+            
             for story_prompt in story_prompts:
-                # Combine ALL character prompts with each story prompt
-                if self.character_prompts:
-                    # Join all character prompts with commas
-                    all_characters = ", ".join(self.character_prompts)
-                    combined_prompt = f"{all_characters}, {story_prompt}"
-                    print(f"DEBUG: Combined prompt with all characters: {combined_prompt}")
-                else:
-                    combined_prompt = story_prompt
-                    print(f"DEBUG: No character prompts, using story only: {combined_prompt}")
+                # Use the same character prefix for all story prompts
+                combined_prompt = f"{character_prefix}{story_prompt}"
+                print(f"DEBUG: Combined prompt with character prefix: {combined_prompt}")
                 combined_prompts.append(combined_prompt)
             self.generated_prompts = combined_prompts
             print(f"DEBUG: Final generated prompts: {self.generated_prompts}")
             
             # Update UI
             self._display_results()
-            self._update_status(f"✅ Đã tạo thành công {len(self.character_prompts)} nhân vật và {len(self.generated_prompts)} story prompts!", "green")
+            self._update_status(f"✅ Đã tạo thành công {len(self.character_prompts)} nhân vật đa dạng và {len(self.generated_prompts)} story prompts!", "green")
+            
+            # Enable execute button if we have prompts
+            if self.generated_prompts:
+                self.execute_btn.config(state='normal')
             
         except Exception as e:
             error_msg = str(e)
@@ -310,80 +345,6 @@ Mỗi prompt trên một dòng, không đánh số.
             self.is_generating = False
             self.generate_btn.config(state="normal")
     
-    def _generate_character_prompts(self):
-        """Generate character appearance prompts using Gemini AI"""
-        if self.is_generating:
-            return
-            
-        story_text = self.story_text.get("1.0", tk.END).strip()
-        if not story_text:
-            messagebox.showerror("Lỗi", "Vui lòng nhập mô tả câu chuyện trước khi tạo nhân vật!")
-            return
-            
-        if not self.model:
-            messagebox.showerror("Lỗi", "Gemini API chưa được cấu hình đúng! Vui lòng kiểm tra API key hoặc kết nối mạng.")
-            return
-            
-        # Start generation in background thread
-        threading.Thread(target=self._generate_character_thread, 
-                        args=(story_text,), daemon=True).start()
-    
-    def _generate_character_thread(self, story_text: str):
-        """Background thread for generating character prompts"""
-        try:
-            self.is_generating = True
-            self._update_status("🔄 Đang tạo mô tả nhân vật...", "orange")
-            self.character_btn.config(state="disabled")
-            
-            # Prepare prompt for Gemini
-            character_prompt = f"""
-Bạn là một chuyên gia tạo mô tả nhân vật cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo 3-5 mô tả chi tiết về ngoại hình nhân vật chính.
-
-Yêu cầu:
-- Mỗi mô tả phải ngắn gọn (dưới 15 từ)
-- Tập trung vào ngoại hình: màu tóc, màu mắt, trang phục, đặc điểm nổi bật
-- Sử dụng từ ngữ sinh động, có tính hình ảnh
-- Phù hợp với phong cách câu chuyện: {self.story_style.get()}
-- Mỗi mô tả phải khác nhau về góc nhìn hoặc đặc điểm
-
-Câu chuyện gốc:
-{story_text}
-
-Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một dòng, không đánh số thứ tự.
-"""
-            
-            # Generate with Gemini
-            response = self.model.generate_content(character_prompt)
-            generated_text = response.text.strip()
-            
-            # Parse the response into individual character prompts
-            character_prompts = []
-            for line in generated_text.split('\n'):
-                line = line.strip()
-                if line and not line.isdigit():  # Skip empty lines and numbers
-                    character_prompts.append(line)
-            
-            # Store generated character prompts
-            self.character_prompts = character_prompts
-            
-            # Update UI
-            self._display_results()
-            self._update_status(f"✅ Đã tạo thành công {len(self.character_prompts)} mô tả nhân vật!", "green")
-            
-        except Exception as e:
-            error_msg = str(e)
-            if "404" in error_msg and "models" in error_msg:
-                self._update_status("❌ Lỗi: Model Gemini không tồn tại hoặc không được hỗ trợ", "red")
-                messagebox.showerror("Lỗi", "Model Gemini không tồn tại hoặc không được hỗ trợ. Vui lòng kiểm tra API key hoặc thử lại sau.")
-            elif "API key" in error_msg or "authentication" in error_msg.lower():
-                self._update_status("❌ Lỗi: API key không hợp lệ", "red")
-                messagebox.showerror("Lỗi", "API key không hợp lệ. Vui lòng kiểm tra lại API key.")
-            else:
-                self._update_status(f"❌ Lỗi khi tạo nhân vật: {error_msg}", "red")
-                messagebox.showerror("Lỗi", f"Không thể tạo mô tả nhân vật: {error_msg}")
-        finally:
-            self.is_generating = False
-            self.character_btn.config(state="normal")
     
     def _display_results(self):
         """Display generated prompts in the results area"""
@@ -392,7 +353,7 @@ Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một 
         
         # Display character prompts if available
         if self.character_prompts:
-            self.results_text.insert(tk.END, "👤 MÔ TẢ NHÂN VẬT:\n")
+            self.results_text.insert(tk.END, "👥 CÁC NHÂN VẬT TRONG CÂU CHUYỆN (SẼ ĐƯỢC THÊM VÀO TẤT CẢ STORY PROMPTS):\n")
             self.results_text.insert(tk.END, "=" * 50 + "\n")
             for i, prompt in enumerate(self.character_prompts, 1):
                 self.results_text.insert(tk.END, f"{i:2d}. {prompt}\n")
@@ -400,7 +361,7 @@ Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một 
         
         # Display story prompts if available
         if self.generated_prompts:
-            self.results_text.insert(tk.END, "🎬 STORY PROMPTS (ĐÃ KẾT HỢP TẤT CẢ NHÂN VẬT):\n")
+            self.results_text.insert(tk.END, "🎬 STORY PROMPTS (ĐÃ KẾT HỢP VỚI NHÂN VẬT):\n")
             self.results_text.insert(tk.END, "=" * 50 + "\n")
             for i, prompt in enumerate(self.generated_prompts, 1):
                 self.results_text.insert(tk.END, f"{i:2d}. {prompt}\n")
@@ -411,42 +372,6 @@ Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một 
         self.results_text.configure(state='disabled')
         self.results_text.see(tk.END)
     
-    def _download_excel_template(self):
-        """Download Excel template file similar to execute tab"""
-        try:
-            # Ask user for save location
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".xlsx",
-                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
-                initialfile="story_template.xlsx",
-                title="Lưu template Excel"
-            )
-            
-            if not file_path:
-                return
-                
-            # Create workbook and worksheet
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Tasks"
-            
-            # Add headers (matching execute tab format)
-            ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])
-            
-            # Add sample rows with story-related prompts
-            ws.append(["text_to_video", "A magical forest with glowing fireflies dancing in the moonlight", "", "16:9", "1", "Veo 3.1 - Fast"])
-            ws.append(["text_to_video", "A brave knight riding through a mystical mountain pass", "", "9:16", "2", "Veo 3.1 - Fast"])
-            ws.append(["text_to_video", "A cozy cottage by the sea with waves gently lapping the shore", "", "16:9", "1", "Veo 3.1 - Fast"])
-            
-            # Save file
-            wb.save(file_path)
-            
-            self._update_status("✅ Đã tạo template Excel thành công!", "green")
-            messagebox.showinfo("Thành công", f"Đã lưu template Excel:\n{file_path}")
-            
-        except Exception as e:
-            self._update_status(f"❌ Lỗi khi tạo template: {str(e)}", "red")
-            messagebox.showerror("Lỗi", f"Không thể tạo template Excel: {str(e)}")
 
     def _export_to_excel(self):
         """Export generated prompts to Excel file"""
@@ -493,9 +418,154 @@ Hãy trả về danh sách 3-5 mô tả nhân vật, mỗi mô tả trên một 
         if messagebox.askyesno("Xác nhận", "Bạn có chắc muốn xóa tất cả prompts đã tạo?"):
             self.generated_prompts = []
             self.character_prompts = []
+            self.character_text.delete('1.0', tk.END)
             self._display_results()
             self._update_status("✅ Đã xóa tất cả prompts", "green")
+            # Disable execute button
+            self.execute_btn.config(state='disabled')
     
+    def _execute_story_prompts(self):
+        """Transfer generated prompts to execute tab and switch to execute tab"""
+        if not self.generated_prompts:
+            messagebox.showwarning("Cảnh báo", "Chưa có prompt nào để execute! Vui lòng tạo story prompts trước.")
+            return
+            
+        try:
+            # Check if we have access to the main application callbacks
+            if not self.ui_callbacks:
+                messagebox.showerror("Lỗi", "Không thể kết nối với execute tab!")
+                return
+                
+            # Create Excel file with generated prompts
+            import tempfile
+            import os
+            from openpyxl import Workbook
+            
+            # Create temporary Excel file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+            temp_file.close()
+            
+            # Create workbook and worksheet
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Tasks"
+            
+            # Add headers (matching execute tab format)
+            ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])
+            
+            # Add data rows with generated prompts
+            for prompt in self.generated_prompts:
+                ws.append(["text_to_video", prompt, "", "16:9", "2", "Veo 3.1 - Fast"])
+            
+            # Save file
+            wb.save(temp_file.name)
+            
+            # Use the callback to import the Excel file and switch to execute tab
+            if 'import_excel_and_switch' in self.ui_callbacks:
+                self.ui_callbacks['import_excel_and_switch'](temp_file.name)
+                self._update_status("✅ Đã chuyển prompts sang execute tab!", "green")
+            else:
+                # Fallback: just show success message
+                self._update_status("✅ Đã tạo file Excel với prompts!", "green")
+                messagebox.showinfo("Thành công", f"Đã tạo file Excel với {len(self.generated_prompts)} prompts:\n{temp_file.name}\n\nVui lòng import file này vào execute tab.")
+            
+        except Exception as e:
+            self._update_status(f"❌ Lỗi khi execute: {str(e)}", "red")
+            messagebox.showerror("Lỗi", f"Không thể execute story prompts: {str(e)}")
+    
+    def _update_character_text_area(self):
+        """Update character text area with current character prompts"""
+        self.character_text.delete('1.0', tk.END)
+        if self.character_prompts:
+            character_text = '\n'.join(self.character_prompts)
+            self.character_text.insert('1.0', character_text)
+    
+    def _on_character_text_change(self, event=None):
+        """Handle character text changes"""
+        try:
+            # Get text from character text area
+            character_text = self.character_text.get('1.0', tk.END).strip()
+            
+            # Parse character prompts from text
+            if character_text:
+                character_prompts = []
+                for line in character_text.split('\n'):
+                    line = line.strip()
+                    if line:
+                        character_prompts.append(line)
+                self.character_prompts = character_prompts
+            else:
+                self.character_prompts = []
+            
+            # Regenerate story prompts if we have them
+            if self.generated_prompts:
+                self._regenerate_story_prompts()
+                
+        except Exception as e:
+            print(f"Error updating character prompts: {e}")
+    
+    def _regenerate_story_prompts(self):
+        """Regenerate story prompts with updated character prompts"""
+        try:
+            # Get original story prompts (without character descriptions)
+            story_text = self.story_text.get("1.0", tk.END).strip()
+            if not story_text:
+                return
+                
+            # Generate new story prompts
+            style = self.story_style.get()
+            num_prompts = len(self.generated_prompts) if self.generated_prompts else 10
+            
+            system_prompt = f"""
+Bạn là một chuyên gia tạo prompt cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo {num_prompts} prompt ngắn gọn và hấp dẫn cho việc tạo video.
+
+Yêu cầu:
+- Mỗi prompt phải bắt đầu bằng "Chỉ sử dụng nhân vật: [tên nhân vật 1, tên nhân vật 2, ...], " sau đó mới là nội dung câu chuyện
+- Mỗi prompt phải là một câu hoặc cụm từ ngắn gọn (dưới 30 từ)
+- Tập trung vào phong cách: {style}
+- Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện
+- Sử dụng từ ngữ sinh động, có tính hình ảnh
+- Tránh lặp lại nội dung giữa các prompt
+- Phù hợp để tạo video ngắn (5-10 giây mỗi prompt)
+- Chỉ sử dụng các nhân vật có trong câu chuyện, không tự tạo nhân vật mới
+
+Câu chuyện gốc:
+{story_text}
+
+Hãy trả về danh sách {num_prompts} prompt, mỗi prompt trên một dòng, không đánh số thứ tự.
+"""
+            
+            # Generate with Gemini
+            response = self.model.generate_content(system_prompt)
+            generated_text = response.text.strip()
+            
+            # Parse the response into individual prompts
+            prompts = []
+            for line in generated_text.split('\n'):
+                line = line.strip()
+                if line and not line.isdigit():
+                    prompts.append(line)
+            
+            # Combine with character prompts
+            combined_prompts = []
+            # Get all character descriptions as a single prefix
+            character_prefix = ""
+            if self.character_prompts:
+                character_prefix = ", ".join(self.character_prompts) + ", "
+            
+            for story_prompt in prompts:
+                # Use the same character prefix for all story prompts
+                combined_prompt = f"{character_prefix}{story_prompt}"
+                combined_prompts.append(combined_prompt)
+            
+            self.generated_prompts = combined_prompts
+            
+            # Update display
+            self._display_results()
+            
+        except Exception as e:
+            print(f"Error regenerating story prompts: {e}")
+
     def _update_status(self, text: str, color: str):
         """Update status label"""
         try:

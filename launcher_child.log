@@ -91,3 +91,6 @@ Stacktrace:
 	RtlGetAppContainerNamedObjectPath [0x0x77e8827e+238]
 
 [EXEC] 21:21:46 | All jobs completed for le@5-xyz.com
+bgerror failed to handle background error.
+    Original error: can't invoke "event" command: application has been destroyed
+    Error in bgerror: can't invoke "tk" command: application has been destroyed

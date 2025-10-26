@@ -49,6 +49,9 @@ class FlowBrowserTool:
         # Optional callbacks for non-Tk UI adapters (PySide6)
         # ui_callbacks keys: on_log(str), on_status(text,color), on_exec_status(text,color), on_jobs_update()
         self.ui_callbacks = ui_callbacks or {}
+        
+        # Add callback for story tab to execute tab transfer
+        self.ui_callbacks['import_excel_and_switch'] = self._import_excel_and_switch_tab
         self.root.title("🎬 Google Flow Tool")
         self.root.geometry("900x650")
         self.root.resizable(True, True)
@@ -75,6 +78,8 @@ class FlowBrowserTool:
         self.account_states = {}
         self.exec_current_jobs = {}
         self.exec_drivers = {}
+        # Job counter for unique indexing
+        self.job_counter = 0
 
         # Error log storage
         self.error_events = []
@@ -298,8 +303,8 @@ class FlowBrowserTool:
 
     # ===================== UI =====================
     def _build_ui(self) -> None:
-        notebook = ttk.Notebook(self.root)
-        notebook.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
@@ -307,14 +312,14 @@ class FlowBrowserTool:
         self.root.bind('<Configure>', self._on_window_resize)
 
         # Tabs
-        login_tab = ttk.Frame(notebook)
-        exec_tab = ttk.Frame(notebook)
-        story_tab = ttk.Frame(notebook)
-        notebook.add(login_tab, text="🔐 Đăng nhập & Tài khoản")
-        notebook.add(exec_tab, text="🎥 Execute Media")
-        notebook.add(story_tab, text="📚 All Story Prompts")
+        login_tab = ttk.Frame(self.notebook)
+        exec_tab = ttk.Frame(self.notebook)
+        story_tab = ttk.Frame(self.notebook)
+        self.notebook.add(login_tab, text="🔐 Đăng nhập & Tài khoản")
+        self.notebook.add(exec_tab, text="🎥 Execute Media")
+        self.notebook.add(story_tab, text="📚 All Story Prompts")
         # Mặc định chọn tab Execute Media
-        notebook.select(1)
+        self.notebook.select(1)
 
         # ===== Login Tab =====
         frame = ttk.Frame(login_tab, padding="20")
@@ -492,7 +497,7 @@ class FlowBrowserTool:
 
         ttk.Label(cfg, text="Outputs per prompt", style='Subtitle.TLabel').grid(row=1, column=2, sticky=tk.W, pady=(8, 0))
         self.outputs_per_prompt = ttk.Combobox(cfg, values=["1", "2", "3", "4"], state="readonly")
-        self.outputs_per_prompt.set("4")
+        self.outputs_per_prompt.set("2")
         self.outputs_per_prompt.grid(row=1, column=3, sticky=(tk.W, tk.E), pady=(8, 0))
 
         ttk.Label(cfg, text="Model", style='Subtitle.TLabel').grid(row=1, column=4, sticky=tk.W, pady=(8, 0))
@@ -1034,6 +1039,8 @@ class FlowBrowserTool:
                 if not meta:
                     continue
                 wf = r.get('wf') or 'frames_to_video'
+                # Debug log để kiểm tra workflow value
+                self._log_exec(f"Processing workflow: '{wf}' from import file")
                 prompt = r.get('prompt') or ''
                 media = r.get('media') or ''
                 settings = {
@@ -1045,6 +1052,82 @@ class FlowBrowserTool:
                 self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings)
             self._log_exec(f"Imported {len(rows)} row(s) from Excel and dispatched to accounts.")
             self._refresh_jobs_view()
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể import Excel: {ex}")
+
+    def _import_excel_and_switch_tab(self, excel_path: str) -> None:
+        """Import Excel file and switch to execute tab (called from story tab)"""
+        try:
+            # Import the Excel file using existing logic
+            wb = load_workbook(filename=excel_path, read_only=True, data_only=True)
+            ws = wb.active
+            rows = []
+            # Safely convert any Excel cell value to trimmed string
+            def _cell_to_str(val):
+                try:
+                    if val is None:
+                        return ''
+                    return str(val).strip()
+                except Exception:
+                    return ''
+            # Expected columns now: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model (header optional)
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if row is None:
+                    continue
+                # Skip header if first row contains strings like 'workflow'
+                if i == 0 and row and isinstance(row[0], str) and 'workflow' in row[0].lower():
+                    continue
+                wf = _cell_to_str(row[0]) if len(row) > 0 else ''
+                prompt = _cell_to_str(row[1]) if len(row) > 1 else ''
+                media = _cell_to_str(row[2]) if len(row) > 2 else ''
+                aspect_ratio = _cell_to_str(row[3]) if len(row) > 3 else ''
+                outputs = _cell_to_str(row[4]) if len(row) > 4 else ''
+                model = _cell_to_str(row[5]) if len(row) > 5 else ''
+                # Skip rows with empty prompts (filter out empty records)
+                if wf and prompt.strip():
+                    rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+            if not rows:
+                messagebox.showerror("Lỗi", "Không có dữ liệu hợp lệ trong file Excel!")
+                return
+            # Determine available accounts from profiles
+            available_emails = [e for e in self.flow_profiles.keys()]
+            if not available_emails:
+                messagebox.showerror("Lỗi", "Chưa có account nào trong cache!")
+                return
+            # Round-robin distribute tasks across accounts
+            idx = 0
+            for r in rows:
+                target_email = available_emails[idx % len(available_emails)]
+                idx += 1
+                meta = self.flow_profiles.get(target_email)
+                if not meta:
+                    continue
+                wf = r.get('wf') or 'frames_to_video'
+                # Debug log để kiểm tra workflow value
+                self._log_exec(f"Processing workflow: '{wf}' from import file")
+                prompt = r.get('prompt') or ''
+                media = r.get('media') or ''
+                settings = {
+                    'aspect_ratio': r.get('aspect_ratio') or '',
+                    'outputs': r.get('outputs') or '',
+                    'model': r.get('model') or ''
+                }
+                # Reuse existing enqueue/start logic per-account, passing settings
+                self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings)
+            
+            self._log_exec(f"Imported {len(rows)} row(s) from Excel and dispatched to accounts.")
+            self._refresh_jobs_view()
+            
+            # Switch to execute tab
+            if hasattr(self, 'notebook'):
+                self.notebook.select(1)  # Switch to execute tab (index 1)
+            
+            # Clean up temporary file
+            try:
+                os.unlink(excel_path)
+            except Exception:
+                pass
+                
         except Exception as ex:
             messagebox.showerror("Lỗi", f"Không thể import Excel: {ex}")
 
@@ -1159,6 +1242,11 @@ class FlowBrowserTool:
 
     def _execute_thread(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict) -> None:
         try:
+            # Increment job counter for unique indexing
+            self.job_counter += 1
+            current_job_index = self.job_counter
+            self._log_exec(f"Starting job #{current_job_index} for {email_addr}")
+            
             self._log_exec("Opening Flow page...")
             drv = self._open_profile_driver(meta)
             # Track driver per account to allow concurrent runs
@@ -1166,6 +1254,8 @@ class FlowBrowserTool:
             self.stop_exec = False
             # Store current prompt for folder naming
             self.current_prompt = prompt
+            # Store current job index for download naming
+            self.current_job_index = current_job_index
             # set current job and refresh view
             try:
                 # Track current job per account for UI
@@ -1190,8 +1280,17 @@ class FlowBrowserTool:
             except Exception:
                 self._log_exec("New project button not found - continue")
 
+            # Mở combobox chọn workflow và chọn theo wf TRƯỚC
+            try:
+                self._log_exec("Opening workflow combobox and selecting option...")
+                self._select_workflow_via_combobox(drv, wf, media)
+                self._log_exec("Workflow selected.")
+            except Exception:
+                self._log_exec("Failed to select workflow via combobox", error=True)
+
+            # Sau khi chọn workflow, mới nhập prompt
             self._log_exec("Typing prompt into textarea...")
-            # Gõ prompt vào textarea id=PINHOLE_TEXT_AREA_ELEMENT_ID
+            # Gõ prompt vào textarea id=PINHOLE_TEXT_AREA_ELEMENT_ID với tốc độ tối ưu
             try:
                 area = drv.find_element(By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID")
                 self._human_click_el(drv, area)
@@ -1200,26 +1299,19 @@ class FlowBrowserTool:
                 except Exception:
                     pass
                 if prompt:
-                    self._human_type_el(area, prompt)
+                    # Sử dụng typing nhanh nhất cho prompt
+                    self._fast_type_prompt(area, prompt)
                     self._log_exec("Prompt typed successfully.")
                 else:
                     self._log_exec("No prompt provided, skipping typing.")
             except Exception:
-                # Fallback: bất kỳ textarea nào nếu id không có
+                # Fallback: bất kỳ textarea nào nếu id không có - sử dụng typing nhanh
                 self._log_exec("PINHOLE_TEXT_AREA_ELEMENT_ID not found, trying fallback textarea...")
-                self._type_into_any(drv, [
+                self._fast_type_into_any(drv, [
                     (By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID"),
                     (By.CSS_SELECTOR, "textarea#PINHOLE_TEXT_AREA_ELEMENT_ID"),
                     (By.CSS_SELECTOR, "textarea")
                 ], prompt)
-
-            # Mở combobox chọn workflow và chọn theo wf
-            try:
-                self._log_exec("Opening workflow combobox and selecting option...")
-                self._select_workflow_via_combobox(drv, wf)
-                self._log_exec("Workflow selected.")
-            except Exception:
-                self._log_exec("Failed to select workflow via combobox", error=True)
 
             # Áp dụng các setting trong popover (Aspect ratio, Outputs per prompt, Model)
             try:
@@ -1231,6 +1323,15 @@ class FlowBrowserTool:
                 aspect_to_use = ar if ar else self.aspect_ratio.get()
                 outputs_to_use = op if op else self.outputs_per_prompt.get()
                 model_to_use = md if md else self.model_choice.get()
+                
+                # Update UI comboboxes to reflect the values being used
+                if ar:
+                    self.aspect_ratio.set(aspect_to_use)
+                if op:
+                    self.outputs_per_prompt.set(outputs_to_use)
+                if md:
+                    self.model_choice.set(model_to_use)
+                
                 self._open_settings_and_apply(drv, aspect_to_use, outputs_to_use, model_to_use)
                 self._log_exec("Settings applied.")
             except Exception as ex:
@@ -1501,15 +1602,23 @@ class FlowBrowserTool:
         except Exception:
             return False
 
-    def _select_workflow_via_combobox(self, driver: webdriver.Chrome, wf: str) -> None:
+    def _select_workflow_via_combobox(self, driver: webdriver.Chrome, wf: str, media: str = None) -> None:
         """Mở combobox (button[role="combobox"]) và chọn mục theo wf.
-        wf == 'text_to_video' -> chọn mục đầu tiên; 'frames_to_video' -> mục thứ 2.
-        Đồng thời hỗ trợ text tiếng Việt trong dropdown Radix.
+        Luôn tìm đúng text đã mapping rồi click vào đó thay vì dựa vào vị trí.
+        Hỗ trợ text tiếng Việt và tiếng Anh trong dropdown Radix.
+        Nếu không tìm được text phù hợp:
+        - Nếu có media (hình ảnh): chọn option 2
+        - Nếu không có media: chọn option 1
         """
+        # Debug log để kiểm tra workflow value được truyền vào
+        self._log_exec(f"Selecting workflow: '{wf}' in combobox")
         # Click trigger combobox
         trigger = driver.find_element(By.CSS_SELECTOR, "button[role='combobox']")
         self._human_click_el(driver, trigger)
-        time.sleep(0.3)
+        
+        # Đợi 2s sau khi mở combobox như yêu cầu
+        self._log_exec("Waiting 2s after opening combobox...")
+        time.sleep(2)
 
         # Đợi content xuất hiện (role=listbox)
         try:
@@ -1519,34 +1628,54 @@ class FlowBrowserTool:
         except Exception:
             pass
 
-        # Ưu tiên chọn theo vị trí
-        option_index = 1 if wf == "text_to_video" else 2
-        try:
-            options = driver.find_elements(By.XPATH, "//*[@role='listbox']//*[@role='option']")
-            if options and len(options) >= option_index:
-                self._human_click_el(driver, options[option_index - 1])
-                return
-        except Exception:
-            pass
-
-        # Fallback: chọn theo text tiếng Việt/Anh
+        # Xác định text cần tìm dựa trên wf
         if wf == "text_to_video":
-            texts = [
-                "Từ văn bản sang video",
+            target_texts = [
+                "Từ văn bản sang video",
                 "Text to Video",
+                "text_to_video",  # Fallback cho trường hợp text khác
             ]
-        else:
-            texts = [
-                "Tạo video từ các khung hình",
+        else:  # frames_to_video hoặc bất kỳ giá trị nào khác
+            target_texts = [
+                "Tạo video từ các khung hình", 
                 "Frames to Video",
+                "frames_to_video",  # Fallback cho trường hợp text khác
             ]
-        for t in texts:
+
+        # Tìm và click vào option có text phù hợp
+        for target_text in target_texts:
             try:
-                el = driver.find_element(By.XPATH, f"//*[@role='listbox']//*[contains(., '{t}')]")
+                # Thử tìm element chứa text chính xác
+                el = driver.find_element(By.XPATH, f"//*[@role='listbox']//*[@role='option'][contains(., '{target_text}')]")
                 self._human_click_el(driver, el)
+                self._log_exec(f"Selected workflow: {target_text}")
                 return
             except Exception:
                 continue
+
+        # Nếu không tìm thấy, log lỗi và thử click option dựa trên media
+        self._log_exec(f"Could not find workflow text for '{wf}', using fallback logic", error=True)
+        try:
+            options = driver.find_elements(By.XPATH, "//*[@role='listbox']//*[@role='option']")
+            if options:
+                # Kiểm tra xem có media (hình ảnh) hay không
+                has_media = media and media.strip() and os.path.isfile(media)
+                
+                if has_media:
+                    # Nếu có media: chọn option 2 (index 1)
+                    if len(options) > 1:
+                        self._human_click_el(driver, options[1])
+                        self._log_exec("Selected option 2 (index 1) as fallback - has media")
+                    else:
+                        # Nếu chỉ có 1 option, chọn option đó
+                        self._human_click_el(driver, options[0])
+                        self._log_exec("Selected only available option as fallback - has media")
+                else:
+                    # Nếu không có media: chọn option 1 (index 0)
+                    self._human_click_el(driver, options[0])
+                    self._log_exec("Selected option 1 (index 0) as fallback - no media")
+        except Exception:
+            self._log_exec("Failed to select any workflow option", error=True)
 
     def _trigger_flow_login(self, driver: webdriver.Chrome) -> None:
         # Try clicking login button on Flow if available
@@ -1960,6 +2089,23 @@ class FlowBrowserTool:
                 return
             except Exception:
                 pass
+
+    def _fast_type_into_any(self, driver: webdriver.Chrome, locators, text: str) -> None:
+        """Fast version of _type_into_any optimized for prompt input."""
+        if not text:
+            return
+        for by, sel in locators:
+            try:
+                el = driver.find_element(by, sel)
+                self._human_click_el(driver, el)
+                try:
+                    el.clear()
+                except Exception:
+                    pass
+                self._fast_type_prompt(el, text)
+                break
+            except Exception:
+                continue
 
     def _type_into_any(self, driver: webdriver.Chrome, locators, text: str) -> None:
         if not text:
@@ -2611,12 +2757,16 @@ class FlowBrowserTool:
                     if 'image' in url:
                         ext = ".png"
                     # Ensure unique filenames to avoid overwriting
+                    # Format: index_array + media_number + timestamp
                     ts = time.strftime('%Y%m%d_%H%M%S')
-                    base_name = f"{ts}_media_{i}{ext}"
+                    # index_array là số thứ tự của job hiện tại
+                    index_array = getattr(self, 'current_job_index', 1)
+                    media_number = i
+                    base_name = f"{index_array}_{media_number}_{ts}{ext}"
                     dest = out_dir / base_name
                     attempt = 1
                     while dest.exists() and attempt < 1000:
-                        dest = out_dir / f"{ts}_media_{i}_{attempt}{ext}"
+                        dest = out_dir / f"{index_array}_{media_number}_{ts}_{attempt}{ext}"
                         attempt += 1
                     self._log_exec(f"Downloading {dest.name}...")
                     # Build request with headers to avoid 403
@@ -2919,8 +3069,7 @@ class FlowBrowserTool:
         return False
     
     def _select_model_strict(self, driver: webdriver.Chrome, model_text: str) -> bool:
-        """Chọn model với xác thực sau click: mở combobox 'Mô hình', chọn option theo text,
-        nếu lệch sẽ chọn lại theo đúng thứ tự (1: Veo 3 - Fast, 2: Veo 2 - Fast, 3: Veo 3 - Quality, 4: Veo 2 - Quality).
+        """Chọn model với xác thực sau click: mở combobox 'Mô hình', chọn option theo text.
         """
         try:
             def get_model_combo():
@@ -2939,32 +3088,20 @@ class FlowBrowserTool:
                 except Exception:
                     return ""
 
-            # Map model -> index theo thứ tự popover
-            order = [
-                "Veo 3 - Fast",
-                "Veo 2 - Fast",
-                "Veo 3 - Quality",
-                "Veo 2 - Quality",
-            ]
-            target_index = None
-            try:
-                target_index = order.index((model_text or "").strip()) + 1
-            except Exception:
-                target_index = None
-
             attempts = 0
             while attempts < 3:
                 attempts += 1
                 combo = get_model_combo()
                 if combo is None:
                     return False
-                try:
-                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", combo)
-                except Exception:
-                    pass
+             
 
                 # Mở listbox và lấy đúng listbox theo aria-controls
                 self._human_click_el(driver, combo)
+                
+                # Đợi 2 giây sau khi mở popup trước khi tìm model
+                time.sleep(2)
+                
                 aria_controls = combo.get_attribute("aria-controls") or ""
                 listbox = None
                 if aria_controls:
@@ -2981,44 +3118,21 @@ class FlowBrowserTool:
                     continue
 
                 picked = False
-                # Ưu tiên chọn bằng bàn phím theo đúng thứ tự index để tránh sai click
-                if target_index is not None:
+                # Phương pháp 1: Click theo text chính xác
+                try:
+                    el = listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{model_text}']]")
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                    self._human_click_el(driver, el)
+                    picked = True
+                except Exception:
+                    # Phương pháp 2: Click theo text chứa (fallback)
                     try:
-                        # HOME về đầu danh sách, sau đó ARROW_DOWN (target_index-1) lần, rồi ENTER
-                        ActionChains(driver).send_keys(Keys.HOME).pause(0.1).perform()
-                        for _ in range(max(0, target_index - 1)):
-                            ActionChains(driver).send_keys(Keys.ARROW_DOWN).pause(0.05).perform()
-                        ActionChains(driver).send_keys(Keys.ENTER).perform()
-                        picked = True
-                    except Exception:
-                        picked = False
-
-                # Nếu bàn phím không thành công, thử click theo text chính xác
-                if not picked:
-                    try:
-                        el = listbox.find_element(By.XPATH, f".//*[@role='option'][.//span[normalize-space(text())='{model_text}']]")
+                        el = listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{model_text}')]")
                         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
                         self._human_click_el(driver, el)
                         picked = True
                     except Exception:
-                        # Fallback contains
-                        try:
-                            el = listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{model_text}')]")
-                            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
-                            self._human_click_el(driver, el)
-                            picked = True
-                        except Exception:
-                            # Fallback cuối: click theo index nếu biết (chuột)
-                            if target_index is not None:
-                                try:
-                                    options = listbox.find_elements(By.XPATH, ".//*[@role='option']")
-                                    if options and len(options) >= target_index:
-                                        el = options[target_index - 1]
-                                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
-                                        self._human_click_el(driver, el)
-                                        picked = True
-                                except Exception:
-                                    pass
+                        pass
 
                 time.sleep(0.3)
                 # Xác thực kết quả hiển thị trên combobox
@@ -3132,34 +3246,82 @@ class FlowBrowserTool:
             except Exception:
                 pass
 
-    def _human_type_el(self, element, text: str) -> None:
-        """Type text into an element with a faster, chunked approach.
-        Falls back to per-char typing if chunked send fails.
+    def _fast_type_prompt(self, element, text: str) -> None:
+        """Ultra-fast typing specifically optimized for prompt input.
+        Uses maximum chunk sizes and minimal delays for fastest possible typing.
         """
         try:
             length = len(text or "")
             if length == 0:
                 return
-            # Choose chunk size based on length for speed while keeping some human-like pacing
-            if length >= 200:
-                chunk_size = 50
-            elif length >= 80:
-                chunk_size = 25
+            
+            # Try to send entire text at once first (fastest possible)
+            try:
+                element.send_keys(text)
+                return
+            except Exception:
+                pass
+            
+            # If that fails, use very large chunks with minimal delay
+            if length >= 1000:
+                chunk_size = 500  # Huge chunks for very long prompts
+            elif length >= 500:
+                chunk_size = 250  # Very large chunks for long prompts
+            elif length >= 200:
+                chunk_size = 100  # Large chunks for medium prompts
             else:
-                chunk_size = 10
+                chunk_size = 50   # Medium chunks for shorter prompts
+            
             for i in range(0, length, chunk_size):
                 chunk = text[i:i+chunk_size]
                 element.send_keys(chunk)
-                # very small jitter to avoid being instantaneous
-                time.sleep(random.uniform(0.001, 0.01))
+                # Ultra-minimal delay - only 0.0001s between chunks
+                time.sleep(0.0001)
         except Exception:
-            # Fallback: per-character minimal delay
+            # Last resort: per-character with absolute minimal delay
             for ch in text:
                 try:
                     element.send_keys(ch)
                 except Exception:
                     continue
-                time.sleep(random.uniform(0.001, 0.01))
+                time.sleep(0.0001)
+
+    def _human_type_el(self, element, text: str) -> None:
+        """Type text into an element with optimized speed for prompt input.
+        Uses larger chunks and minimal delays for faster typing.
+        """
+        try:
+            length = len(text or "")
+            if length == 0:
+                return
+            
+            # Optimized chunk sizes for maximum speed while maintaining compatibility
+            if length >= 500:
+                chunk_size = 200  # Very large chunks for long prompts
+            elif length >= 200:
+                chunk_size = 100  # Large chunks for medium prompts
+            elif length >= 50:
+                chunk_size = 50   # Medium chunks for shorter prompts
+            else:
+                chunk_size = 25   # Small chunks for very short prompts
+            
+            for i in range(0, length, chunk_size):
+                chunk = text[i:i+chunk_size]
+                element.send_keys(chunk)
+                # Minimal delay for speed - only 0.001s between chunks
+                time.sleep(0.001)
+        except Exception:
+            # Fallback: try to send entire text at once for maximum speed
+            try:
+                element.send_keys(text)
+            except Exception:
+                # Last resort: per-character with minimal delay
+                for ch in text:
+                    try:
+                        element.send_keys(ch)
+                    except Exception:
+                        continue
+                    time.sleep(0.001)
 
     # ===================== Status =====================
     def _set_status(self, text: str, color: str) -> None:
