@@ -89,8 +89,8 @@ class FlowBrowserTool:
         except Exception:
             pass
 
-        # Profiles (cache per email)
-        self.flow_profiles_path = os.path.join(os.getcwd(), "chrome_cache", "flow_profiles.json")
+        # Profiles (cache per email) - share with Whisk tool
+        self.flow_profiles_path = os.path.join(os.getcwd(), "chrome_cache", "whisk_profiles.json")
         self.flow_profiles = {}
         self._load_profiles()
 
@@ -318,6 +318,8 @@ class FlowBrowserTool:
         self.notebook.add(login_tab, text="🔐 Đăng nhập & Tài khoản")
         self.notebook.add(exec_tab, text="🎥 Execute Media")
         self.notebook.add(story_tab, text="📚 All Story Prompts")
+        help_tab = ttk.Frame(self.notebook)
+        self.notebook.add(help_tab, text="❓ Help")
         # Mặc định chọn tab Execute Media
         self.notebook.select(1)
 
@@ -388,7 +390,8 @@ class FlowBrowserTool:
         actions = ttk.Frame(profiles_group)
         actions.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
         ttk.Button(actions, text="👁️ Mở profile", command=self._open_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT)
-        ttk.Button(actions, text="🗑️ Xóa cache", command=self._delete_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT, padx=8)
+        ttk.Button(actions, text="📄 Nhân bản cache", command=self._duplicate_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT, padx=8)
+        ttk.Button(actions, text="🗑️ Xóa cache", command=self._delete_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT)
 
         self._refresh_profiles_list()
 
@@ -639,6 +642,28 @@ class FlowBrowserTool:
         self.exec_current_job = None
         self._refresh_jobs_view()
 
+        # ===== Help Tab =====
+        try:
+            help_tab.columnconfigure(0, weight=1)
+            help_tab.rowconfigure(0, weight=1)
+            help_frame = ttk.Frame(help_tab, padding="20")
+            help_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+            help_frame.columnconfigure(0, weight=1)
+            ttk.Label(help_frame, text="❓ Trợ giúp", style='Title.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 16))
+            desc = (
+                "📄 Nhân bản cache: Tạo một profile dựa trên cache hiện có để chạy song song nhiều luồng cho cùng một tài khoản.\n"
+                "- Khi bấm 'Nhân bản cache', công cụ sẽ sao chép thư mục cache hiện tại (bỏ qua các file lock)\n"
+                "- Profile mới được đặt tên kèm timestamp và xuất hiện trong danh sách tài khoản\n"
+                "- Flow và Whisk dùng chung profile (whisk_*) để không cần đăng nhập lại\n\n"
+                "🔐 Đăng nhập Google: Theo dõi tiến trình đăng nhập hiển thị trên giao diện.\n"
+                "- Tool sẽ chủ động hỗ trợ tối đa khi Google yêu cầu CAPTCHA/OTP/2FA (nếu có thể tự động).\n"
+                "- Trường hợp cần thao tác thủ công (nhập mã OTP/2FA), hãy hoàn tất trong trình duyệt đang mở; tool sẽ tự phát hiện và tiếp tục."
+            )
+            lbl = ttk.Label(help_frame, text=desc, style='Info.TLabel', justify='left')
+            lbl.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        except Exception:
+            pass
+
         # ===== Story Tab =====
         if _HAS_STORY_TAB and StoryPromptGenerator is not None:
             try:
@@ -803,7 +828,8 @@ class FlowBrowserTool:
             cache_dir = existing_cache_dir
         else:
             safe_key = re.sub(r'[^a-zA-Z0-9_.-]', '_', cache_key) or "default"
-            cache_dir = os.path.join(os.getcwd(), "chrome_cache", f"flow_{safe_key}")
+            # Use shared whisk_ prefix to share profiles with Whisk tool
+            cache_dir = os.path.join(os.getcwd(), "chrome_cache", f"whisk_{safe_key}")
             os.makedirs(cache_dir, exist_ok=True)
         self.current_cache_dir = cache_dir
         # Nếu profile đang bị một Chrome khác giữ, báo lỗi rõ ràng
@@ -1992,6 +2018,65 @@ class FlowBrowserTool:
             self._set_status(f"Đã xóa cache của {email_addr}", "green")
         except Exception as ex:
             messagebox.showerror("Lỗi", f"Không thể xóa cache: {ex}")
+
+    def _duplicate_selected_profile(self) -> None:
+        try:
+            sel = self.profiles_list.curselection()
+            if not sel:
+                messagebox.showinfo("Thông báo", "Vui lòng chọn một tài khoản trong danh sách!")
+                return
+            line = self.profiles_list.get(sel[0])
+            source_key = line.split("  |  ")[0].strip()
+            meta = self.flow_profiles.get(source_key)
+            if not meta:
+                messagebox.showerror("Lỗi", "Không tìm thấy cache nguồn!")
+                return
+
+            src_cache = meta.get("cache_dir")
+            if not src_cache or not os.path.isdir(src_cache):
+                messagebox.showerror("Lỗi", "Thư mục cache nguồn không tồn tại!")
+                return
+
+            # Auto-generate new profile key with timestamp
+            timestamp_label = time.strftime('%Y%m%d_%H%M%S')
+            new_key = f"{source_key}_{timestamp_label}"
+            if new_key in self.flow_profiles:
+                new_key = f"{new_key}_{random.randint(1000,9999)}"
+
+            # Prepare destination cache dir with shared whisk_ prefix
+            safe_key = re.sub(r'[^a-zA-Z0-9_.-]', '_', new_key) or "clone"
+            base_dst_cache = os.path.join(os.getcwd(), "chrome_cache", f"whisk_{safe_key}")
+            dst_cache = base_dst_cache
+            if os.path.exists(dst_cache):
+                dst_cache = f"{base_dst_cache}_{random.randint(1000,9999)}"
+
+            # Copy folder excluding lock files
+            try:
+                import shutil
+                def _ignore(dir, names):
+                    ignores = {"SingletonLock", "LOCK", "lockfile", "SingletonCookie", "SingletonSocket"}
+                    return [n for n in names if n in ignores]
+                shutil.copytree(src_cache, dst_cache, ignore=_ignore)
+            except Exception as ex:
+                messagebox.showerror("Lỗi", f"Không thể nhân bản cache: {ex}")
+                return
+
+            # Register new profile
+            self.flow_profiles[new_key] = {
+                "cache_dir": dst_cache,
+                "user_agent": meta.get("user_agent") or random.choice(self.user_agents),
+                "last_login": int(time.time()),
+            }
+            self._save_profiles()
+            self._refresh_profiles_list()
+            self._refresh_exec_emails()
+            self._set_status(f"Đã nhân bản cache từ '{source_key}' → '{new_key}'", "green")
+            try:
+                self._log_exec(f"Duplicated cache to {dst_cache}")
+            except Exception:
+                pass
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể nhân bản cache: {ex}")
 
     # ===================== Generic Actions =====================
     def _choose_image_file(self) -> None:

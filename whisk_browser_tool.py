@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
+from tkinter import simpledialog
 import os
 import base64
 import re
@@ -135,6 +136,8 @@ class WhiskBrowserTool:
         exec_tab = ttk.Frame(notebook)
         notebook.add(login_tab, text="🔐 Đăng nhập Whisk")
         notebook.add(exec_tab, text="🎥 Execute")
+        help_tab = ttk.Frame(notebook)
+        notebook.add(help_tab, text="❓ Help")
         notebook.select(1)
 
         frame = ttk.Frame(login_tab, padding="20")
@@ -182,7 +185,30 @@ class WhiskBrowserTool:
         actions = ttk.Frame(profiles)
         actions.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(8, 0))
         ttk.Button(actions, text="👁️ Mở profile", command=self._open_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT)
-        ttk.Button(actions, text="🗑️ Xóa cache", command=self._delete_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT, padx=8)
+        ttk.Button(actions, text="📄 Nhân bản cache", command=self._duplicate_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT, padx=8)
+        ttk.Button(actions, text="🗑️ Xóa cache", command=self._delete_selected_profile, style='Secondary.TButton').pack(side=tk.LEFT)
+        
+        # ===== Help Tab =====
+        try:
+            help_tab.columnconfigure(0, weight=1)
+            help_tab.rowconfigure(0, weight=1)
+            help_frame = ttk.Frame(help_tab, padding="20")
+            help_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+            help_frame.columnconfigure(0, weight=1)
+            ttk.Label(help_frame, text="❓ Trợ giúp", style='Title.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 16))
+            desc = (
+                "📄 Nhân bản cache: Tạo một profile dựa trên cache hiện có để chạy song song nhiều luồng cho cùng một tài khoản.\n"
+                "- Khi bấm 'Nhân bản cache', công cụ sẽ sao chép thư mục cache hiện tại (bỏ qua các file lock)\n"
+                "- Profile mới được đặt tên kèm timestamp và xuất hiện trong danh sách tài khoản\n"
+                "- Có thể mở nhiều profile cùng lúc để thực thi song song\n\n"
+                "🔐 Đăng nhập Google: Theo dõi tiến trình đăng nhập hiển thị trên giao diện.\n"
+                "- Tool sẽ chủ động hỗ trợ tối đa khi Google yêu cầu CAPTCHA/OTP/2FA (nếu có thể tự động).\n"
+                "- Trường hợp cần thao tác thủ công (nhập mã OTP/2FA), hãy hoàn tất trong trình duyệt đang mở; tool sẽ tự phát hiện và tiếp tục."
+            )
+            lbl = ttk.Label(help_frame, text=desc, style='Info.TLabel', justify='left')
+            lbl.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        except Exception:
+            pass
 
         log_box = ttk.LabelFrame(frame, text="📜 Log", padding="10", style='Card.TLabelframe')
         log_box.grid(row=5, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(12, 0))
@@ -1904,6 +1930,66 @@ class WhiskBrowserTool:
             self._set_status(f"Đã xóa cache của {email_addr}", "green")
         except Exception as ex:
             messagebox.showerror("Lỗi", f"Không thể xóa cache: {ex}")
+
+    def _duplicate_selected_profile(self) -> None:
+        try:
+            sel = self.profiles_list.curselection()
+            if not sel:
+                messagebox.showinfo("Thông báo", "Vui lòng chọn một tài khoản trong danh sách!")
+                return
+            line = self.profiles_list.get(sel[0])
+            source_key = line.split("  |  ")[0].strip()
+            meta = self.whisk_profiles.get(source_key)
+            if not meta:
+                messagebox.showerror("Lỗi", "Không tìm thấy cache nguồn!")
+                return
+
+            src_cache = meta.get("cache_dir")
+            if not src_cache or not os.path.isdir(src_cache):
+                messagebox.showerror("Lỗi", "Thư mục cache nguồn không tồn tại!")
+                return
+
+            # Auto-generate new profile label using timestamp
+            timestamp_label = time.strftime('%Y%m%d_%H%M%S')
+            new_key = f"{source_key}_{timestamp_label}"
+            # Ensure uniqueness among profile keys
+            if new_key in self.whisk_profiles:
+                new_key = f"{new_key}_{random.randint(1000,9999)}"
+
+            # Prepare destination cache dir
+            safe_key = re.sub(r'[^a-zA-Z0-9_.-]', '_', new_key) or "clone"
+            base_dst_cache = os.path.join(os.getcwd(), "chrome_cache", f"whisk_{safe_key}")
+            dst_cache = base_dst_cache
+            # If destination exists, add a random suffix to avoid collision
+            if os.path.exists(dst_cache):
+                dst_cache = f"{base_dst_cache}_{random.randint(1000,9999)}"
+
+            # Copy cache directory excluding lock files
+            try:
+                import shutil
+                def _ignore(dir, names):
+                    ignores = {"SingletonLock", "LOCK", "lockfile"}
+                    return [n for n in names if n in ignores]
+                shutil.copytree(src_cache, dst_cache, ignore=_ignore)
+            except Exception as ex:
+                messagebox.showerror("Lỗi", f"Không thể nhân bản cache: {ex}")
+                return
+
+            # Register new profile
+            self.whisk_profiles[new_key] = {
+                "cache_dir": dst_cache,
+                "user_agent": meta.get("user_agent") or random.choice(self.user_agents),
+                "last_login": int(time.time()),
+            }
+            self._save_profiles()
+            self._refresh_profiles_list()
+            self._set_status(f"Đã nhân bản cache từ '{source_key}' → '{new_key}'", "green")
+            try:
+                self._append_log(f"[SYSTEM] {time.strftime('%H:%M:%S')} | Duplicated cache to {dst_cache}\n")
+            except Exception:
+                pass
+        except Exception as ex:
+            messagebox.showerror("Lỗi", f"Không thể nhân bản cache: {ex}")
 
     # ===================== UX helpers =====================
     def _append_log(self, text: str) -> None:

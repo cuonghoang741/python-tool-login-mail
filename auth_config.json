@@ -1,5 +1,5 @@
 {
-  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NCwiZW1haWwiOiIxQGdtYWlsLmNvbSIsImF1dGhUeXBlIjoiRU1BSUwiLCJyZWZyZXNoVG9rZW5JZCI6MjAsImlhdCI6MTc2MDg5NTMwNywiZXhwIjo1MDAwMDE3NjA4OTUzMDd9.QQF_jG0Wka0kycvwqTUTTeYg0LlGPuuwJ02ee9pk1p8",
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NCwiZW1haWwiOiIxQGdtYWlsLmNvbSIsImF1dGhUeXBlIjoiRU1BSUwiLCJyZWZyZXNoVG9rZW5JZCI6NzEsImlhdCI6MTc2MjM1MTM3OCwiZXhwIjo1MDAwMDE3NjIzNTEzNzh9.LtSZSqUAbWNEbd1O0a9eMJN_OXEidzfdjybkMO1_d8c",
   "user": {
     "message": "Success",
     "statusCode": 200,
@@ -11,9 +11,9 @@
       "password": "$2a$10$WSQbOGqimiWjsDI23eNx..qtM789XUpTBD4Qdx6pzpdWDLy4HBs4a",
       "googleId": null,
       "authType": "EMAIL",
-      "lastSignIn": "2025-10-19T17:35:07.369Z",
+      "lastSignIn": "2025-11-05T14:02:58.178Z",
       "createdAt": "2025-10-19T17:20:05.949Z",
-      "updatedAt": "2025-10-19T17:35:07.371Z",
+      "updatedAt": "2025-11-05T14:02:58.179Z",
       "deletedAt": null,
       "activePackage": {
         "id": 9,
@@ -46,5 +46,5 @@
       }
     }
   },
-  "savedAt": 1760895307
+  "savedAt": 1762351379
 }

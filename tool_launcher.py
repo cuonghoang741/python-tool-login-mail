@@ -612,7 +612,7 @@ def show_login_form():
     auth_processed = False
     
     def on_login():
-        nonlocal login_success
+        nonlocal login_success, auth_result, auth_error, auth_processed
         print("🔐 Login button clicked")
         username = username_entry.get().strip()
         password = password_entry.get()
@@ -632,6 +632,11 @@ def show_login_form():
         
         print("✅ Input validation passed")
         
+        # Reset auth state for a new attempt to avoid stale flags causing hangs
+        auth_result = None
+        auth_error = None
+        auth_processed = False
+
         # Disable login button during authentication
         print("🔄 Disabling login button...")
         login_btn.config(state='disabled', text='Đang đăng nhập...')
