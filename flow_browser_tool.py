@@ -911,6 +911,16 @@ class FlowBrowserTool:
             self.login_btn.config(state="disabled")
             meta = self.flow_profiles.get(email_addr)
             exist_dir = meta.get("cache_dir") if meta else None
+            # Yêu cầu: khi login, nếu có cache của email thì xoá trước khi mở mới
+            try:
+                if exist_dir and os.path.isdir(exist_dir):
+                    import shutil
+                    shutil.rmtree(exist_dir, ignore_errors=True)
+                    # Không dùng lại thư mục cũ
+                    exist_dir = None
+            except Exception:
+                # Nếu không xoá được, vẫn tiếp tục tạo profile mới với tên khác
+                exist_dir = None
             self.driver = self._build_chrome(email_addr, existing_cache_dir=exist_dir)
 
             # Go to Flow
@@ -960,6 +970,14 @@ class FlowBrowserTool:
             self.login_btn.config(state="disabled")
             meta = self.flow_profiles.get(email_addr)
             exist_dir = meta.get("cache_dir") if meta else None
+            # Yêu cầu: khi login, nếu có cache của email thì xoá trước khi mở mới
+            try:
+                if exist_dir and os.path.isdir(exist_dir):
+                    import shutil
+                    shutil.rmtree(exist_dir, ignore_errors=True)
+                    exist_dir = None
+            except Exception:
+                exist_dir = None
             self.driver = self._build_chrome(email_addr, existing_cache_dir=exist_dir)
             self.driver.get("https://accounts.google.com/signin")
             self._human_delay(2, 4)
@@ -1377,6 +1395,13 @@ class FlowBrowserTool:
                     return
                 except Exception as ex:
                     self._log_exec(f"Failed to click Create button for text_to_video: {ex}", error=True)
+                    # Đánh dấu thất bại ngay khi không nhấn được nút Tạo
+                    try:
+                        messagebox.showerror("Thất bại", "Không nhấn được nút 'Tạo'. Tiến trình được đánh dấu thất bại.")
+                    except Exception:
+                        pass
+                    # Dừng tiến trình hiện tại
+                    raise
 
             # Apply config if UI exposes inputs (best-effort)
             # (Removed) basic config for resolution/duration/fps per user request
@@ -1398,19 +1423,28 @@ class FlowBrowserTool:
                     self._log_exec("Clicking 'Cắt và lưu' and waiting for first frame...")
                     self._confirm_crop_and_wait_first_frame(drv)
                     self._log_exec("First frame detected.")
-                    # Sau khi có khung hình đầu tiên, nhấn nút Tạo (Create)
+                except Exception:
+                    self._log_exec("Could not confirm crop/save or detect first frame", error=True)
+                # Sau khi có khung hình đầu tiên, thử nhấn nút Tạo (Create)
+                try:
                     self._log_exec("Clicking 'Tạo' (Create) button...")
                     self._click_create_button(drv)
                     self._log_exec("Clicked 'Tạo' successfully.")
-                    # Chờ 10s rồi theo dõi tiến trình và tải kết quả
-                    self._log_exec("Waiting 100s before monitoring processing...")
-                    time.sleep(100)
-                    self._log_exec("Monitoring processing and then reading API logs...")
-                    self._monitor_and_fetch_api(drv, wf="frames_to_video")
-                    # ĐÃ HOÀN TẤT Frames to Video: return ngay để không chạy các bước Submit/Monitor chung bên dưới
-                    return
-                except Exception:
-                    self._log_exec("Could not confirm crop/save or detect first frame", error=True)
+                except Exception as ex:
+                    self._log_exec(f"Failed to click Create button for frames_to_video: {ex}", error=True)
+                    try:
+                        messagebox.showerror("Thất bại", "Không nhấn được nút 'Tạo'. Tiến trình được đánh dấu thất bại.")
+                    except Exception:
+                        pass
+                    # Dừng tiến trình hiện tại
+                    raise
+                # Chờ rồi theo dõi tiến trình và tải kết quả
+                self._log_exec("Waiting 100s before monitoring processing...")
+                time.sleep(100)
+                self._log_exec("Monitoring processing and then reading API logs...")
+                self._monitor_and_fetch_api(drv, wf="frames_to_video")
+                # ĐÃ HOÀN TẤT Frames to Video: return ngay để không chạy các bước Submit/Monitor chung bên dưới
+                return
 
             # Execute/Run
             self._log_exec("Submitting job...")
@@ -3472,6 +3506,32 @@ def main() -> None:
             try:
                 if getattr(app, 'exec_driver', None) is not None:
                     app.exec_driver.quit()
+            except Exception:
+                pass
+            # Đóng tất cả driver trong exec_drivers (nếu có)
+            try:
+                if hasattr(app, 'exec_drivers') and isinstance(app.exec_drivers, dict):
+                    for _key, drv in list(app.exec_drivers.items()):
+                        try:
+                            if drv is not None:
+                                drv.quit()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            # Thử buộc đóng toàn bộ tiến trình Chrome/ChromeDriver còn lại trên Windows
+            try:
+                import subprocess
+                # Đóng tất cả chrome.exe
+                try:
+                    subprocess.run(["taskkill", "/IM", "chrome.exe", "/F"], capture_output=True)
+                except Exception:
+                    pass
+                # Đóng tất cả chromedriver.exe
+                try:
+                    subprocess.run(["taskkill", "/IM", "chromedriver.exe", "/F"], capture_output=True)
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:

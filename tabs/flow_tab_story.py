@@ -15,8 +15,20 @@ class StoryPromptGenerator:
         self.parent_frame = parent_frame
         self.ui_callbacks = ui_callbacks or {}
         
-        # Gemini API configuration
-        self.gemini_api_key = "AIzaSyDg7cgmRziMGKfbBzRASl1F4Uc4gsmkyDw"
+        # Gemini API configuration: list of keys, random pick per chat
+        self.gemini_api_keys = [
+            "AIzaSyCj7QUDt8yOO2SGvAIYSHG9SuBx0VQ65Gg",
+            "AIzaSyCDxL6JPL93pCd6TtlEaMOFAsnlXKbZBms",
+            "AIzaSyBOSt-O3agTSa3L4SEZQCmWWEfPcUgfNVI",
+            "AIzaSyC0GC29JhCjPpAjCOUOSrDn-F6o7VvVuVo",
+            "AIzaSyBqY24XI_atNtedt2TirxYBsnyDSKqokns",
+            "AIzaSyBa4qjmeE09xHOWMR1rd1MtsvzZpJi0bRE",
+            "AIzaSyDDXGcyKluU_qEyV9ZieCZeThkN36jh-0g",
+            "AIzaSyBsRBtbBwW6wmal91_VEBPThqUDGc_F2M4",
+            "AIzaSyDg7cgmRziMGKfbBzRASl1F4Uc4gsmkyDw",
+            "AIzaSyDHF18e72D6MiO4a7UKouorHn_SrNAbu1k",
+        ]
+        self.gemini_api_key = None
         self.model = None
         self._setup_gemini()
         
@@ -26,8 +38,11 @@ class StoryPromptGenerator:
         self._build_ui()
     
     def _setup_gemini(self):
-        """Initialize Gemini API"""
+        """Initialize Gemini API using a random key from the list."""
         try:
+            if not self.gemini_api_keys:
+                raise ValueError("No Gemini API keys configured")
+            self.gemini_api_key = random.choice(self.gemini_api_keys)
             genai.configure(api_key=self.gemini_api_key)
             self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         except Exception as e:
@@ -179,6 +194,9 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         if self.is_generating:
             return
             
+        # Randomize API key per chat
+        self._setup_gemini()
+
         story_text = self.story_text.get("1.0", tk.END).strip()
         if not story_text:
             messagebox.showerror("Lỗi", "Vui lòng nhập mô tả câu chuyện!")
