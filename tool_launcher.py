@@ -848,7 +848,7 @@ def show_login_form():
     info_text.pack(pady=(12, 0))
 
     # Brand & contact
-    brand_contact = ttk.Label(container, text="ANIMTECH • Zalo: 0966515665", 
+    brand_contact = ttk.Label(container, text="ANIMTECH", 
                               font=("Segoe UI", 9, "bold"), foreground="#4B5563")
     brand_contact.pack(pady=(8, 0))
     
@@ -889,7 +889,7 @@ def _show_about():
                 "Năng lực cốt lõi: mô hình AI tùy biến theo dự án, tích hợp sâu với DCC \n"
                 "(Blender, After Effects, v.v.), render phân tán, theo dõi chất lượng \n"
                 "tự động và khả năng mở rộng linh hoạt cho studio mọi quy mô.\n\n"
-                "Liên hệ: Zalo 0966515665"
+                "Liên hệ: ANIMTECH"
             )
         )
     except Exception:
@@ -981,7 +981,7 @@ def main() -> None:
     # Brand & contact
     brand = ttk.Label(
         container,
-        text="ANIMTECH • Zalo: 0966515665",
+        text="ANIMTECH",
         foreground="#4B5563",
         font=("Segoe UI", 10, "bold")
     )

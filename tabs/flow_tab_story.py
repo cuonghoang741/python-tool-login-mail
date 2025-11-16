@@ -60,11 +60,25 @@ class StoryPromptGenerator:
         # Title
         title = ttk.Label(main_frame, text="📚 All Story Prompts Generator", 
                          font=("Segoe UI", 18, "bold"))
-        title.grid(row=0, column=0, columnspan=2, pady=(0, 20))
-        
-        # Story input section
-        story_frame = ttk.LabelFrame(main_frame, text="📖 Nhập câu chuyện", padding="15")
-        story_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        title.grid(row=0, column=0, columnspan=2, pady=(0, 20), sticky=tk.W)
+
+        # Two-column layout: left (inputs & actions), right (results)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(1, weight=1)
+
+        left_frame = ttk.Frame(main_frame)
+        left_frame.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(0, 10))
+        left_frame.columnconfigure(0, weight=1)
+
+        right_frame = ttk.Frame(main_frame)
+        right_frame.grid(row=1, column=1, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(10, 0))
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+
+        # Story input section (left)
+        story_frame = ttk.LabelFrame(left_frame, text="📖 Nhập câu chuyện", padding="15")
+        story_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
         story_frame.configure(style='Card.TLabelframe')
         story_frame.columnconfigure(0, weight=1)
         
@@ -86,9 +100,9 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         
         self.story_text.insert("1.0", example_story)
         
-        # Configuration section
-        config_frame = ttk.LabelFrame(main_frame, text="⚙️ Cấu hình", padding="15")
-        config_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        # Configuration section (left)
+        config_frame = ttk.LabelFrame(left_frame, text="⚙️ Cấu hình", padding="15")
+        config_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
         config_frame.configure(style='Card.TLabelframe')
         
         # Number of prompts
@@ -116,41 +130,47 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         self.story_style.set("Hành động phiêu lưu")
         self.story_style.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
         
-        # Action buttons
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+        # Action buttons (left)
+        button_frame = ttk.Frame(left_frame)
+        button_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        # two columns layout for buttons
+        try:
+            button_frame.columnconfigure(0, weight=1)
+            button_frame.columnconfigure(1, weight=1)
+        except Exception:
+            pass
         
         self.generate_btn = ttk.Button(button_frame, text="🎬 Tạo Story Prompts", 
                                      command=self._generate_story_prompts, 
                                      style='Accent.TButton')
-        self.generate_btn.grid(row=0, column=0, padx=(0, 10))
+        self.generate_btn.grid(row=0, column=0, padx=(0, 10), sticky=(tk.W, tk.E))
         
         
         self.export_btn = ttk.Button(button_frame, text="📥 Export Excel", 
                                    command=self._export_to_excel, 
                                    style='Secondary.TButton')
-        self.export_btn.grid(row=0, column=1, padx=(0, 10))
+        self.export_btn.grid(row=0, column=1, padx=(0, 0), sticky=(tk.W, tk.E))
         
         self.clear_btn = ttk.Button(button_frame, text="🗑️ Xóa tất cả", 
                                    command=self._clear_all, 
                                    style='Secondary.TButton')
-        self.clear_btn.grid(row=0, column=2, padx=(0, 10))
+        self.clear_btn.grid(row=1, column=0, padx=(0, 10), pady=(8, 0), sticky=(tk.W, tk.E))
         
         # Execute button to transfer to execute tab
         self.execute_btn = ttk.Button(button_frame, text="🚀 Execute", 
                                      command=self._execute_story_prompts, 
                                      style='Accent.TButton',
                                      state='disabled')
-        self.execute_btn.grid(row=0, column=3, padx=(10, 0))
+        self.execute_btn.grid(row=1, column=1, padx=(0, 0), pady=(8, 0), sticky=(tk.W, tk.E))
         
-        # Status
-        self.status_label = ttk.Label(main_frame, text="✅ Sẵn sàng tạo story prompts", 
+        # Status (below left panel)
+        self.status_label = ttk.Label(left_frame, text="✅ Sẵn sàng tạo story prompts", 
                                     style='Success.TLabel')
-        self.status_label.grid(row=4, column=0, columnspan=2, sticky=tk.W)
+        self.status_label.grid(row=3, column=0, sticky=tk.W)
         
-        # Character prompts edit section
-        character_frame = ttk.LabelFrame(main_frame, text="👤 Nhân Vật (Có thể chỉnh sửa)", padding="10")
-        character_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(10, 0))
+        # Character prompts edit section (right, below results)
+        character_frame = ttk.LabelFrame(right_frame, text="👤 Nhân Vật (Có thể chỉnh sửa)", padding="10")
+        character_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
         character_frame.configure(style='Card.TLabelframe')
         character_frame.columnconfigure(0, weight=1)
         character_frame.rowconfigure(1, weight=1)
@@ -165,9 +185,9 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
                                                        highlightbackground='#2A2F3A')
         self.character_text.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         
-        # Results display
-        results_frame = ttk.LabelFrame(main_frame, text="📋 Kết quả Story Prompts", padding="10")
-        results_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(10, 0))
+        # Results display (right)
+        results_frame = ttk.LabelFrame(right_frame, text="📋 Kết quả Story Prompts", padding="10")
+        results_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         results_frame.configure(style='Card.TLabelframe')
         results_frame.columnconfigure(0, weight=1)
         results_frame.rowconfigure(0, weight=1)
@@ -180,7 +200,7 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         self.results_text.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
         
         # Make results area expandable
-        main_frame.rowconfigure(6, weight=1)
+        # left_frame grows vertically with its content implicitly; right_frame is configured above
         
         # Bind character text changes to update character prompts
         self.character_text.bind('<KeyRelease>', self._on_character_text_change)
@@ -242,7 +262,7 @@ YÊU CẦU MÔ TẢ CỰC KỲ CHI TIẾT (40-60 từ mỗi nhân vật):
 - TÍNH CÁCH: Thể hiện qua ngoại hình (kiên định, nhút nhát, mạnh mẽ, dịu dàng)
 - Ghi rõ ai là nhân vật chính
 - TẠO RA NHIỀU NHÂN VẬT KHÁC NHAU (nhân vật chính, nhân vật phụ, động vật, v.v.)
-- Mỗi mô tả phải dài 40-60 từ để CỰC KỲ CHI TIẾT
+- Mỗi mô tả phải dài 40-60 từ để CỰC KỲ CHI TIẾT, gồm cả dáng di chuyển
 - Sử dụng từ ngữ sinh động, có tính hình ảnh, cụ thể
 - Phù hợp với phong cách câu chuyện: {self.story_style.get()}
 - Mỗi nhân vật phải có đặc điểm riêng biệt và dễ phân biệt
@@ -271,54 +291,70 @@ Hãy trả về danh sách 4-6 mô tả nhân vật CỰC KỲ CHI TIẾT khác 
             self._update_character_text_area()
             
             self._update_status("🔄 Đang tạo story prompts...", "orange")
-            
-            # Now generate story prompts
+
+            # Now generate story prompts in batches of 10, chaining previous outputs
             style = self.story_style.get()
-            system_prompt = f"""
-Bạn là một chuyên gia tạo prompt cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo {num_prompts} prompt ngắn gọn và hấp dẫn cho việc tạo video.
+            prompts = []
+            base_instruction = f"""
+Bạn là một chuyên gia tạo prompt cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo prompt ngắn gọn và hấp dẫn cho việc tạo video.
 
 Yêu cầu:
 - Mỗi prompt phải bắt đầu bằng "Chỉ sử dụng nhân vật: [tên nhân vật 1, tên nhân vật 2, ...], " sau đó mới là nội dung câu chuyện
 - Mỗi prompt phải là một câu mô tả câu chuyện, hoặc lời thoại nếu có
 - Tập trung vào phong cách: {style}
-- Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện
+- Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện, theo thứ tự tiến triển tự nhiên
 - Sử dụng từ ngữ sinh động, có tính hình ảnh
 - Tránh lặp lại nội dung giữa các prompt
 - Phù hợp để tạo video ngắn (5-10 giây mỗi prompt)
 
 Câu chuyện gốc:
 {story_text}
+"""
 
-Hãy trả về danh sách {num_prompts} prompt, mỗi prompt trên một dòng, không đánh số thứ tự.
-"""
-            
-            # Generate with Gemini
-            response = self.model.generate_content(system_prompt)
-            generated_text = response.text.strip()
-            
-            # Parse the response into individual prompts
-            prompts = []
-            for line in generated_text.split('\n'):
-                line = line.strip()
-                if line and not line.isdigit():  # Skip empty lines and numbers
-                    prompts.append(line)
-            
-            # If we got fewer prompts than requested, generate more
             while len(prompts) < num_prompts:
-                additional_needed = num_prompts - len(prompts)
-                additional_prompt = f"""
-Tạo thêm {additional_needed} prompt ngắn gọn cho câu chuyện này, phong cách {style}.
-Mỗi prompt trên một dòng, không đánh số.
+                batch_size = min(10, num_prompts - len(prompts))
+                if prompts:
+                    # Send previous instruction and accumulated prompts to continue
+                    continuation_instruction = f"""
+Tin nhắn trước đó (giữ nguyên yêu cầu):
+{base_instruction}
+
+Các prompt đã tạo trước đó (giữ nguyên thứ tự):
+{chr(10).join(prompts)}
+
+Hãy tạo thêm {batch_size} prompt MỚI tiếp nối mạch truyện, không trùng lặp, mỗi prompt trên một dòng, không đánh số.
 """
-                try:
-                    additional_response = self.model.generate_content(additional_prompt)
-                    additional_lines = additional_response.text.strip().split('\n')
-                    for line in additional_lines:
-                        line = line.strip()
-                        if line and not line.isdigit() and len(prompts) < num_prompts:
-                            prompts.append(line)
-                except Exception:
+                    prompt_text = continuation_instruction
+                else:
+                    first_batch_instruction = f"""
+{base_instruction}
+
+Hãy trả về danh sách {batch_size} prompt đầu tiên, mỗi prompt trên một dòng, không đánh số thứ tự.
+"""
+                    prompt_text = first_batch_instruction
+
+                # Request this batch
+                batch_response = self.model.generate_content(prompt_text)
+                batch_text = (batch_response.text or "").strip()
+
+                # Parse and append up to batch_size
+                new_items = []
+                for line in batch_text.split('\n'):
+                    line = line.strip()
+                    if line and not line.isdigit():
+                        new_items.append(line)
+                    if len(new_items) >= batch_size:
+                        break
+
+                # Fallback: if the model returned fewer than requested, still proceed
+                if new_items:
+                    prompts.extend(new_items)
+                else:
+                    # Break to avoid infinite loop if nothing returned
                     break
+
+                # Update status to show progress
+                self._update_status(f"🔄 Đang tạo story prompts... ({len(prompts)}/{num_prompts})", "orange")
             
             # Always combine character prompts with story prompts
             story_prompts = prompts[:num_prompts]
@@ -334,7 +370,7 @@ Mỗi prompt trên một dòng, không đánh số.
             
             for story_prompt in story_prompts:
                 # Use the same character prefix for all story prompts
-                combined_prompt = f"{character_prefix}{story_prompt}"
+                combined_prompt = f"{character_prefix}\n\n{story_prompt}"
                 print(f"DEBUG: Combined prompt with character prefix: {combined_prompt}")
                 combined_prompts.append(combined_prompt)
             self.generated_prompts = combined_prompts
@@ -414,12 +450,13 @@ Mỗi prompt trên một dòng, không đánh số.
             ws = wb.active
             ws.title = "Tasks"
             
-            # Add headers (matching execute tab format)
-            ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])
+            # Add headers (matching execute tab format) + story_only
+            ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model", "story_only"])
             
             # Add data rows
             for prompt in self.generated_prompts:
-                ws.append(["text_to_video", prompt, "", "16:9", "1", "Veo 3.1 - Fast"])
+                story_only = self._extract_story_only(prompt)
+                ws.append(["text_to_video", prompt, "", "16:9", "1", "Veo 3.1 - Fast", story_only])
             
             # Save file
             wb.save(file_path)
@@ -430,6 +467,37 @@ Mỗi prompt trên một dòng, không đánh số.
         except Exception as e:
             self._update_status(f"❌ Lỗi khi export: {str(e)}", "red")
             messagebox.showerror("Lỗi", f"Không thể export file Excel: {str(e)}")
+
+    def _extract_story_only(self, prompt_text: str) -> str:
+        """Extract only the story part without the character list prefix.
+        Prefer splitting on the two newlines we insert between character block and story line.
+        Fallback heuristics: detect prefix patterns and strip them; otherwise return trimmed text.
+        """
+        try:
+            text = prompt_text.strip()
+            # Primary: split on the separator we add between character block and story
+            sep = "\n\n"
+            if sep in text:
+                parts = text.split(sep, 1)
+                return parts[1].strip()
+            # Secondary: if current character prefix exists, strip it
+            if self.character_prompts:
+                prefix = ", ".join(self.character_prompts) + ", "
+                if text.startswith(prefix):
+                    return text[len(prefix):].lstrip(" \n\t:-")
+            # Legacy pattern: "Chỉ sử dụng nhân vật: [...], <story>"
+            close_idx = text.find('],')
+            if close_idx != -1:
+                return text[close_idx + 2:].strip(" :,-\u2014\u2013\u00a0\t")
+            # Fallback: if there's a colon after the lead phrase, split on first comma after colon
+            lead = "Chỉ sử dụng nhân vật"
+            if text.lower().startswith(lead.lower()):
+                first_comma = text.find(',')
+                if first_comma != -1:
+                    return text[first_comma + 1:].strip()
+            return text
+        except Exception:
+            return prompt_text
     
     def _clear_all(self):
         """Clear all generated prompts and reset UI"""
@@ -573,7 +641,7 @@ Hãy trả về danh sách {num_prompts} prompt, mỗi prompt trên một dòng,
             
             for story_prompt in prompts:
                 # Use the same character prefix for all story prompts
-                combined_prompt = f"{character_prefix}{story_prompt}"
+                combined_prompt = f"{character_prefix}\n\n{story_prompt}"
                 combined_prompts.append(combined_prompt)
             
             self.generated_prompts = combined_prompts

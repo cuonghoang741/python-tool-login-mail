@@ -2,18 +2,18 @@
 echo Building GoogleFlowTool for Windows...
 echo.
 
-REM Check if Python is available
-python --version >nul 2>&1
+REM Check if Python 3.11 is available
+py -3.11 --version >nul 2>&1
 if errorlevel 1 (
-    echo Error: Python is not installed or not in PATH
-    echo Please install Python 3.8+ and try again
+    echo Error: Python 3.11 is not installed
+    echo Please install Python 3.11: winget install Python.Python.3.11
     pause
     exit /b 1
 )
 
-REM Create virtual environment
-echo Creating virtual environment...
-py -m venv venv
+REM Create virtual environment with Python 3.11
+echo Creating virtual environment with Python 3.11...
+py -3.11 -m venv venv
 if errorlevel 1 (
     echo Error: Failed to create virtual environment
     pause

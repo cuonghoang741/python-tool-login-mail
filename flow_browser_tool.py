@@ -2690,10 +2690,10 @@ class FlowBrowserTool:
             pass
 
         # Delay first reload by 60s, then reload every ~10s
-        initial_reload_delay = 60.0
+        initial_reload_delay = 30
         notified_wait = False
         retries_after_initial = 0
-        max_retries_after_initial = 3
+        max_retries_after_initial = 5
 
         while True:
             if self.stop_exec:

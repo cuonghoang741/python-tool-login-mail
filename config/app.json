@@ -1,0 +1,7 @@
+{
+  "model_id": "tts_models/multilingual/multi-dataset/xtts_v2",
+  "use_gpu": false,
+  "voices_dir": "voices",
+  "outputs_dir": "outputs",
+  "logs_dir": "logs"
+}
