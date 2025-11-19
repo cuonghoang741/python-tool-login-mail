@@ -669,7 +669,7 @@ class FlowBrowserTool:
             try:
                 self.story_generator = StoryPromptGenerator(story_tab, self.ui_callbacks)
             except Exception as e:
-                print(f"Failed to initialize story tab: {e}")
+                self._log_error(f"Failed to initialize story tab: {e}")
                 # Create a simple error message frame
                 error_frame = ttk.Frame(story_tab, padding="20")
                 error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
@@ -2253,42 +2253,10 @@ class FlowBrowserTool:
                 continue
 
     def _log_exec(self, message: str, success: bool = False, error: bool = False) -> None:
-        """Print to console, update status label, and append to on-screen log. Supports UI callbacks."""
-        prefix = "[EXEC]"
-        line = f"{prefix} {time.strftime('%H:%M:%S')} | {message}\n"
-        print(line, end="")
-        # Callback-based logging (for PySide6 adapter)
-        try:
-            cb = self.ui_callbacks.get('on_log') if hasattr(self, 'ui_callbacks') else None
-            if cb:
-                try:
-                    cb(line)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        # Tk UI log append
-        try:
-            if getattr(self, 'use_tk_ui', True):
-                self._append_exec_log(line)
-        except Exception:
-            pass
-        # Status update
-        color = "orange"
-        if error:
-            color = "red"
-        elif success:
-            color = "green"
-        try:
-            # Callback for status line (non-Tk UI)
-            cb_status = self.ui_callbacks.get('on_exec_status') if hasattr(self, 'ui_callbacks') else None
-            if cb_status:
-                try:
-                    cb_status(message, color)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        """Legacy execution log helper. Only forwards error logs now to reduce noise."""
+        if not error:
+            return
+        self._log_error(message)
 
     def _append_exec_log(self, text: str) -> None:
         """Append text to the progress log textbox and auto-scroll to bottom."""

@@ -170,6 +170,8 @@ def authenticate_user(username, password):
                 msg = data.get("message") or data.get("error") or resp.text
             except Exception:
                 msg = resp.text
+            if resp.status_code >= 500:
+                msg = "Tài khoản hoặc mật khẩu không chính xác."
             print(f"❌ Error message: {msg}")
             return {"success": False, "error": msg or "Đăng nhập thất bại"}
 
@@ -207,6 +209,15 @@ def authenticate_user(username, password):
             print(f"⚠️ /me failed: {e}")  # Debug info
             pass  # Continue with basic user data if /me fails
 
+        # Ensure the package is still active before completing login
+        is_valid_package, exp_msg = _check_package_expiration(user)
+        if not is_valid_package:
+            print(f"⛔ Package expired or invalid: {exp_msg}")
+            return {
+                "success": False,
+                "error": f"Tài khoản đã hết hạn: {exp_msg or 'Vui lòng gia hạn để tiếp tục sử dụng.'}"
+            }
+
         print(f"💾 Saving auth config for user: {user}")
         # Save immediately
         save_auth_config({
@@ -243,94 +254,136 @@ def _api_me(token: str):
     return resp.json() if resp.content else {}
 
 def _check_package_expiration(user_data):
-    """Check if user package is expired"""
+    """Validate user package info from /me response"""
     if not user_data:
-        return False, "Không có thông tin gói"
+        return False, "Không có thông tin tài khoản"
     
     print(f"🔍 Checking package expiration for user data: {user_data}")
     
-    # Handle nested structure from /me API
     exp_time = None
     package_name = "Unknown"
+    package_present = False
     
-    # Check if it's the nested structure from /me API
     if isinstance(user_data, dict):
-        # Handle nested structure: user_data.result.activePackage
         actual_user_data = user_data
-        if 'result' in user_data:
-            actual_user_data = user_data['result']
+        if 'result' in actual_user_data and isinstance(actual_user_data['result'], dict):
+            actual_user_data = actual_user_data['result']
             print(f"🔍 Found nested result structure, using: {actual_user_data}")
-        
-        # Check for activePackage structure
-        if 'activePackage' in actual_user_data:
-            active_pkg = actual_user_data['activePackage']
-            if isinstance(active_pkg, dict):
-                exp_time = active_pkg.get('endDate')
-                if 'package' in active_pkg:
-                    package_name = active_pkg['package'].get('name', 'Unknown')
-                    print(f"📦 Found package: {package_name}")
+        if 'user' in actual_user_data and isinstance(actual_user_data['user'], dict):
+            actual_user_data = actual_user_data['user']
+            print(f"🔍 Found nested user structure, using: {actual_user_data}")
+    else:
+        actual_user_data = {}
+    
+    if not isinstance(actual_user_data, dict):
+        return False, "Dữ liệu tài khoản không hợp lệ"
+    
+    # Check deleted flags
+    deleted_fields = ['deletedAt', 'deleted_at']
+    for field in deleted_fields:
+        deleted_value = actual_user_data.get(field)
+        if deleted_value:
+            return False, "Tài khoản đã bị khóa hoặc xóa"
+    
+    # Check package info
+    active_pkg = actual_user_data.get('activePackage')
+    if isinstance(active_pkg, dict):
+        deleted_value = active_pkg.get('deletedAt') or active_pkg.get('deleted_at')
+        if deleted_value:
+            return False, "Gói dịch vụ đã bị hủy"
+        package_present = True
+        package_obj = active_pkg.get('package')
+        if isinstance(package_obj, dict):
+            package_name = package_obj.get('name', package_name)
         else:
-            # Check various possible expiration fields for direct structure
-            exp_fields = ['expiresAt', 'expires_at', 'expirationDate', 'expiration_date', 'exp', 'endDate']
-            for field in exp_fields:
-                if field in actual_user_data:
-                    exp_time = actual_user_data[field]
-                    break
-            
-            # Get package name from various fields
-            package_name = actual_user_data.get('package', actual_user_data.get('plan', 'Standard'))
+            package_name = active_pkg.get('name', package_name)
+        exp_time = active_pkg.get('endDate') or active_pkg.get('expiresAt') or active_pkg.get('expires_at')
+    else:
+        package_candidate = actual_user_data.get('package') or actual_user_data.get('plan')
+        if package_candidate:
+            package_present = True
+            if isinstance(package_candidate, dict):
+                package_name = package_candidate.get('name', package_name)
+            else:
+                package_name = package_candidate
+        exp_fields = ['expiresAt', 'expires_at', 'expirationDate', 'expiration_date', 'exp', 'endDate']
+        for field in exp_fields:
+            field_value = actual_user_data.get(field)
+            if field_value:
+                exp_time = field_value
+                break
+    
+    if not package_present:
+        return False, "Tài khoản chưa có gói dịch vụ hoặc đã hết hạn"
     
     if not exp_time:
-        return True, "Không có thông tin hết hạn"
+        return False, "Không xác định được thời hạn sử dụng gói"
     
-    print(f"📅 Expiration time: {exp_time}")
+    print(f"📅 Expiration time: {exp_time} | Package: {package_name}")
     
     try:
-        # Handle different time formats
+        import datetime
         if isinstance(exp_time, (int, float)):
-            exp_timestamp = exp_time
+            exp_timestamp = float(exp_time)
         elif isinstance(exp_time, str):
-            # Try to parse ISO format or timestamp
-            import datetime
             try:
-                # Handle ISO format with Z suffix
                 if exp_time.endswith('Z'):
                     exp_timestamp = datetime.datetime.fromisoformat(exp_time.replace('Z', '+00:00')).timestamp()
                 else:
                     exp_timestamp = datetime.datetime.fromisoformat(exp_time).timestamp()
-            except:
+            except Exception:
                 exp_timestamp = float(exp_time)
         else:
-            return True, "Định dạng thời gian không hợp lệ"
+            return False, "Định dạng thời gian hết hạn không hợp lệ"
         
         current_time = time.time()
         if exp_timestamp <= current_time:
-            return False, "Gói đã hết hạn"
+            return False, "Gói dịch vụ đã hết hạn"
         
-        # Calculate days remaining
-        days_left = (exp_timestamp - current_time) / (24 * 3600)
-        if days_left <= 7:
-            return True, f"Còn {int(days_left)} ngày"
-        else:
-            return True, f"Còn {int(days_left)} ngày"
-            
+        days_left = int((exp_timestamp - current_time) / (24 * 3600))
+        return True, f"Còn {max(days_left, 0)} ngày"
     except Exception as e:
         print(f"❌ Error parsing expiration: {e}")
-        return True, f"Lỗi kiểm tra hết hạn: {str(e)}"
+        return False, f"Lỗi kiểm tra hết hạn: {str(e)}"
 
-def check_existing_auth():
-    """Validate stored token via /me."""
+def check_existing_auth(alert_on_failure: bool = False):
+    """Validate stored token via /me and ensure package is active."""
     global _is_authenticated, _auth_token
     config = load_auth_config()
     token = config.get('accessToken') or config.get('token')
     if not token:
         return False
     try:
-        _ = _api_me(token)
+        user_data = _api_me(token)
+        is_valid, exp_msg = _check_package_expiration(user_data)
+        if not is_valid:
+            err_msg = exp_msg or "Tài khoản không hợp lệ."
+            if alert_on_failure:
+                try:
+                    messagebox.showerror("Không thể tiếp tục", err_msg)
+                except Exception:
+                    print(f"[AUTH] {err_msg}")
+            else:
+                print(f"[AUTH] {err_msg}")
+            logout(show_message=False)
+            return False
+        
+        save_auth_config({
+            "accessToken": token,
+            "user": user_data,
+            "savedAt": int(time.time())
+        })
         _is_authenticated = True
         _auth_token = token
         return True
-    except Exception:
+    except Exception as e:
+        if alert_on_failure:
+            try:
+                messagebox.showerror("Phiên đăng nhập không hợp lệ", f"Không thể xác thực token: {e}")
+            except Exception:
+                print(f"[AUTH] Không thể xác thực token: {e}")
+        else:
+            print(f"[AUTH] Không thể xác thực token: {e}")
         return False
 
 def _start_auth_monitor(root):
@@ -359,7 +412,7 @@ def _start_auth_monitor(root):
                         except Exception:
                             pass
                         try:
-                            logout()
+                            logout(show_message=False)
                             root.quit()
                             # Restart the application
                             main()
@@ -377,7 +430,7 @@ def _start_auth_monitor(root):
                     except Exception:
                         pass
                     try:
-                        logout()
+                        logout(show_message=False)
                         root.quit()
                         # Restart the application
                         main()
@@ -602,7 +655,7 @@ def show_login_form():
     global _is_authenticated, _auth_token
     
     # Check if already authenticated
-    if check_existing_auth():
+    if check_existing_auth(alert_on_failure=True):
         return True
     
     login_root = None
@@ -713,7 +766,7 @@ def show_login_form():
             
             if not is_valid:
                 messagebox.showerror("Gói hết hạn", f"Gói của bạn đã hết hạn!\n{exp_msg}\nVui lòng gia hạn để tiếp tục sử dụng.")
-                logout()
+                logout(show_message=False)
                 return
             
             # Show success message with package info
@@ -858,7 +911,7 @@ def show_login_form():
     return login_success
 
 
-def logout():
+def logout(show_message: bool = True):
     """Logout user and clear authentication"""
     global _is_authenticated, _auth_token
     _is_authenticated = False
@@ -871,7 +924,8 @@ def logout():
     except Exception:
         pass
     
-    messagebox.showinfo("Đăng xuất", "Đã đăng xuất thành công!")
+    if show_message:
+        messagebox.showinfo("Đăng xuất", "Đã đăng xuất thành công!")
 
 def _show_about():
     try:
