@@ -5,9 +5,57 @@ import json
 import time
 import threading
 import random
-from openpyxl import Workbook
-import google.generativeai as genai
 from typing import List, Dict, Any
+
+import requests
+from openpyxl import Workbook
+
+try:
+    import google.generativeai as _genai_sdk
+    _GENAI_IMPORT_ERROR = None
+except Exception as exc:  # capture grpc/cygrpc errors too
+    _genai_sdk = None
+    _GENAI_IMPORT_ERROR = exc
+
+
+class _RestResponse:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _GeminiRestClient:
+    """Fallback client that talks to Gemini REST API directly."""
+
+    def __init__(self, api_key: str, model_name: str):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.session = requests.Session()
+
+    def generate_content(self, prompt: str):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        }
+        resp = self.session.post(url, params={"key": self.api_key}, json=payload, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        text_chunks = []
+        for candidate in data.get("candidates", []):
+            content = candidate.get("content", {})
+            for part in content.get("parts", []):
+                if "text" in part:
+                    text_chunks.append(part["text"])
+            if text_chunks:
+                break
+        text = "\n".join(text_chunks).strip()
+        return _RestResponse(text)
 
 
 class StoryPromptGenerator:
@@ -17,6 +65,18 @@ class StoryPromptGenerator:
         
         # Gemini API configuration: list of keys, random pick per chat
         self.gemini_api_keys = [
+            'AIzaSyAXhfRKTwP5zAkJbm90ajr93Q4GdmBwhRU',
+            'AIzaSyCnTTeUj7C32dpKUORYwy3FWRKb6_X6bS4',
+            'AIzaSyAH1dXX0demoy6o1CNzP6Ojf5u6yac-Ndo',
+            'AIzaSyAhdS1h96roE3GnvJOfGPF50t8sLnyyXB8',
+            'AIzaSyBacZLGxE6FBnAw-pzg1y0pPnH299wxYs0',
+            'AIzaSyAHjP1qSgj5eImFfW_KcOPKpFjKhqnY4oQ',
+            'AIzaSyBmUtRXiW69DSaxwM_Ygxs-5IUSprHhgKQ',
+            'AIzaSyDizLuF-cdWT1GLlYixSmqnFMEuUc4LUL4',
+            'AIzaSyCVskdll1uS0_fA4kK0z0KQldZ7rfz-o88',
+            'AIzaSyDffoRKMqnMin3Uoh1U46aFgZtFX5dhP1M',
+            'AIzaSyBsCwWhAC4qkT3uxc-tA8DleFhMkHI-_gg',
+            'AIzaSyBb5k53lkGRJeTYPr4a11Y4HfBD15NOxFk',
             "AIzaSyCj7QUDt8yOO2SGvAIYSHG9SuBx0VQ65Gg",
             "AIzaSyCDxL6JPL93pCd6TtlEaMOFAsnlXKbZBms",
             "AIzaSyBOSt-O3agTSa3L4SEZQCmWWEfPcUgfNVI",
@@ -30,6 +90,8 @@ class StoryPromptGenerator:
         ]
         self.gemini_api_key = None
         self.model = None
+        self.model_backend = None  # 'sdk' or 'rest'
+        self.last_setup_error = None
         self._setup_gemini()
         
         # UI state
@@ -43,11 +105,22 @@ class StoryPromptGenerator:
             if not self.gemini_api_keys:
                 raise ValueError("No Gemini API keys configured")
             self.gemini_api_key = random.choice(self.gemini_api_keys)
-            genai.configure(api_key=self.gemini_api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            if _genai_sdk is not None:
+                _genai_sdk.configure(api_key=self.gemini_api_key)
+                self.model = _genai_sdk.GenerativeModel('gemini-2.5-pro
+')
+                self.model_backend = "sdk"
+            else:
+                # Fallback to REST client if SDK is unavailable (e.g., missing cygrpc)
+                self.model = _GeminiRestClient(self.gemini_api_key, 'gemini-2.5-pro
+')
+                self.model_backend = "rest"
+            self.last_setup_error = None
         except Exception as e:
             print(f"Failed to setup Gemini API: {e}")
             self.model = None
+            self.model_backend = None
+            self.last_setup_error = e
     
     def _build_ui(self):
         """Build the story prompt generation UI"""
@@ -232,7 +305,12 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
             return
             
         if not self.model:
-            messagebox.showerror("Lỗi", "Gemini API chưa được cấu hình đúng! Vui lòng kiểm tra API key hoặc kết nối mạng.")
+            detail = "Gemini API chưa được cấu hình đúng! Vui lòng kiểm tra API key hoặc kết nối mạng."
+            if self.last_setup_error:
+                detail += f"\nChi tiết: {self.last_setup_error}"
+            elif _GENAI_IMPORT_ERROR:
+                detail += f"\nChi tiết: {_GENAI_IMPORT_ERROR}"
+            messagebox.showerror("Lỗi", detail)
             return
             
         # Start generation in background thread

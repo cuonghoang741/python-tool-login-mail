@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import os
+import sys
+import importlib.util
 from functools import partial
 import re
 import json
@@ -23,13 +25,42 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from openpyxl import load_workbook
 
-# Import story tab
+# Import story tab (with fallback loader for packaged builds)
+StoryPromptGenerator = None
+_HAS_STORY_TAB = False
+_STORY_TAB_ERROR = None
+
+def _load_story_tab_from_file() -> None:
+    """Attempt to load story tab module manually (e.g., PyInstaller data)."""
+    global StoryPromptGenerator, _HAS_STORY_TAB, _STORY_TAB_ERROR
+    possible_roots = []
+    # PyInstaller extracts resources to sys._MEIPASS
+    if hasattr(sys, "_MEIPASS"):
+        possible_roots.append(sys._MEIPASS)
+    # Current working directory as fallback
+    possible_roots.append(os.getcwd())
+    for root in possible_roots:
+        candidate = os.path.join(root, "tabs", "flow_tab_story.py")
+        if os.path.exists(candidate):
+            try:
+                spec = importlib.util.spec_from_file_location("tabs.flow_tab_story", candidate)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules["tabs.flow_tab_story"] = module
+                    spec.loader.exec_module(module)
+                    StoryPromptGenerator = getattr(module, "StoryPromptGenerator", None)
+                    _HAS_STORY_TAB = StoryPromptGenerator is not None
+                    if _HAS_STORY_TAB:
+                        return
+            except Exception as exc:
+                _STORY_TAB_ERROR = exc
+
 try:
     from tabs.flow_tab_story import StoryPromptGenerator
     _HAS_STORY_TAB = True
-except ImportError:
-    StoryPromptGenerator = None
-    _HAS_STORY_TAB = False
+except ImportError as exc:
+    _STORY_TAB_ERROR = exc
+    _load_story_tab_from_file()
 
 
 # Optional modern theming with ttkbootstrap (for a significantly improved look)
@@ -679,8 +710,11 @@ class FlowBrowserTool:
             # Create a simple message frame if story tab is not available
             error_frame = ttk.Frame(story_tab, padding="20")
             error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-            ttk.Label(error_frame, text="❌ Story Tab không khả dụng", 
-                     style='Error.TLabel').pack()
+            err_text = "❌ Story Tab không khả dụng"
+            if _STORY_TAB_ERROR:
+                err_text += f"\nChi tiết: {_STORY_TAB_ERROR}"
+            ttk.Label(error_frame, text=err_text, 
+                     style='Error.TLabel', justify='center', wraplength=480).pack()
 
     # ===================== Responsive Helpers =====================
     def _on_window_resize(self, event):

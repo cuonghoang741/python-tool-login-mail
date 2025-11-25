@@ -11,40 +11,40 @@
       "password": "$2a$10$WSQbOGqimiWjsDI23eNx..qtM789XUpTBD4Qdx6pzpdWDLy4HBs4a",
       "googleId": null,
       "authType": "EMAIL",
-      "lastSignIn": "2025-11-19T15:57:27.485Z",
+      "lastSignIn": "2025-11-25T17:25:40.205Z",
       "createdAt": "2025-10-19T17:20:05.949Z",
-      "updatedAt": "2025-11-19T15:57:27.486Z",
+      "updatedAt": "2025-11-25T17:25:40.205Z",
       "deletedAt": null,
       "activePackage": {
-        "id": 9,
+        "id": 22,
         "userId": 4,
-        "packageId": 1,
+        "packageId": 4,
         "status": "ACTIVE",
-        "startDate": "2025-10-19T17:20:05.976Z",
-        "endDate": "2025-11-19T17:20:05.976Z",
-        "createdAt": "2025-10-19T17:20:05.979Z",
-        "updatedAt": "2025-10-19T17:20:05.979Z",
+        "startDate": "2025-11-25T15:52:51.580Z",
+        "endDate": "2026-11-25T15:52:51.580Z",
+        "createdAt": "2025-11-25T15:52:51.582Z",
+        "updatedAt": "2025-11-25T15:52:51.582Z",
         "deletedAt": null,
         "package": {
-          "id": 1,
-          "name": "Gói 1 tháng",
-          "description": "Gói sử dụng 1 tháng với đầy đủ tính năng",
-          "type": "MONTHLY_1",
-          "price": "99000",
-          "duration": 1,
+          "id": 4,
+          "name": "Gói 1 năm",
+          "description": "Gói sử dụng 1 năm với đầy đủ tính năng",
+          "type": "YEARLY_1",
+          "price": "799000",
+          "duration": 12,
           "features": {
             "quality": "HD",
-            "priority": "normal",
-            "maxDuration": "30s",
-            "videoGeneration": 100
+            "priority": "high",
+            "maxDuration": "60s",
+            "videoGeneration": 1200
           },
           "isActive": true,
-          "createdAt": "2025-10-19T16:29:26.569Z",
-          "updatedAt": "2025-10-19T16:29:35.389Z",
+          "createdAt": "2025-10-19T16:29:26.608Z",
+          "updatedAt": "2025-10-19T16:29:35.432Z",
           "deletedAt": null
         }
       }
     }
   },
-  "savedAt": 1763567853
+  "savedAt": 1764091713
 }
