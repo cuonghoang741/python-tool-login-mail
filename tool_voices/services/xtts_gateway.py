@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import sys
 from typing import Iterable, Optional, Tuple
 
 
@@ -41,15 +43,39 @@ class XTTSModelGateway:
     @property
     def tts(self):
         if self._tts is None:
+            # Disable TorchScript JIT to avoid "requires source access" errors
+            # in frozen (PyInstaller) builds where some internal kernels
+            # don't have an accessible .py source.
+            os.environ.setdefault("PYTORCH_JIT", "0")
+
+            torch = self.torch
+            try:
+                # Best-effort: turn off JIT globally if available.
+                if hasattr(torch, "jit") and hasattr(torch.jit, "_state"):
+                    try:
+                        torch.jit._state.disable()
+                    except Exception:
+                        pass
+            except Exception:
+                # If we can't touch JIT state, continue with env flag only.
+                pass
+
             try:
                 from TTS.api import TTS  # type: ignore
             except ModuleNotFoundError:
-                raise ModuleNotFoundError(
-                    "Module 'TTS' chưa được cài đặt.\n"
-                    "Vui lòng chạy: pip install TTS"
+                # Khi chay bang Python binh thuong -> huong dan pip install
+                if not getattr(sys, "frozen", False):
+                    raise ModuleNotFoundError(
+                        "Module 'TTS' chưa được cài đặt.\n"
+                        "Vui lòng chạy: pip install TTS"
+                    )
+                # Khi chay tu file .exe da dong goi ma van thieu TTS -> loi dong goi
+                raise RuntimeError(
+                    "Ứng dụng thiếu thư viện TTS trong gói build.\n"
+                    "Vui lòng sử dụng bản cài đặt mới nhất của Tool Voice Cloning "
+                    "hoặc liên hệ người phát triển để rebuild ứng dụng."
                 )
             # Fix for PyTorch 2.6: patch torch.load to allow loading TTS models
-            torch = self.torch
             original_load = torch.load
             
             def patched_load(*args, **kwargs):

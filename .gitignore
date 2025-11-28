@@ -16,3 +16,9 @@ build/
 venv/
 
 logs/   
+
+venv
+
+venv_voice
+
+tool_voices/*/__pycache__/*
