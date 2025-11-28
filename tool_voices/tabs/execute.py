@@ -58,9 +58,29 @@ class SynthesisWorker(QThread):
         self._intensity = intensity
         self._max_workers = max_workers
         self._advanced_params = advanced_params or {}
+        self._log_callback = None
+    
+    def set_log_callback(self, callback):
+        """Set callback function to receive log messages."""
+        self._log_callback = callback
+    
+    def _log(self, message: str):
+        """Emit log message via signal and callback."""
+        self.progress.emit(message)
+        if self._log_callback:
+            self._log_callback(message)
     
     def run(self):
         try:
+            # Set up log callback in service
+            self._synthesis_service.set_log_callback(self._log)
+            
+            self._log("🚀 Bắt đầu tạo audio...")
+            self._log(f"📝 Text: {len(self._text)} ký tự")
+            self._log(f"🎤 Giọng: {self._voice}")
+            self._log(f"😊 Cảm xúc: {self._emotion}, Cường độ: {self._intensity:.2f}")
+            self._log(f"⚙️ Workers: {self._max_workers}")
+            
             output = self._synthesis_service.synthesize(
                 text=self._text,
                 voice_name=self._voice,
@@ -68,9 +88,16 @@ class SynthesisWorker(QThread):
                 intensity=self._intensity,
                 max_workers=self._max_workers,
             )
+            
+            self._log(f"✅ Hoàn tất! File: {output.name}")
             self.finished.emit(output)
         except Exception as e:
-            self.error.emit(str(e))
+            error_msg = str(e)
+            self._log(f"❌ Lỗi: {error_msg}")
+            self.error.emit(error_msg)
+        finally:
+            # Clear log callback
+            self._synthesis_service.set_log_callback(None)
 
 
 class ExecuteController:
@@ -121,6 +148,7 @@ class ExecuteTab(QWidget):
 
         layout.addWidget(self._build_form_section())
         layout.addWidget(self._build_action_bar())
+        layout.addWidget(self._build_log_section())
         layout.addWidget(self._build_outputs_list())
         layout.addStretch()
 
@@ -363,6 +391,47 @@ class ExecuteTab(QWidget):
 
         return container
 
+    def _build_log_section(self) -> QWidget:
+        """Build log display section."""
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Header with clear button
+        header_layout = QHBoxLayout()
+        title = QLabel("📋 Log tiến trình", container)
+        title.setStyleSheet("font-size: 16px; font-weight: 500;")
+        header_layout.addWidget(title)
+        header_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+        
+        self._clear_log_button = QPushButton("Xóa log", container)
+        self._clear_log_button.setMaximumWidth(100)
+        self._clear_log_button.clicked.connect(self._clear_log)
+        header_layout.addWidget(self._clear_log_button)
+        
+        layout.addLayout(header_layout)
+
+        # Log text area
+        self._log_text = QTextEdit(container)
+        self._log_text.setReadOnly(True)
+        self._log_text.setMaximumHeight(200)
+        self._log_text.setPlaceholderText("Log tiến trình sẽ hiển thị ở đây...")
+        self._log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11px;
+                border: 1px solid #3e3e3e;
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)
+        layout.addWidget(self._log_text)
+
+        return container
+
     def _build_outputs_list(self) -> QWidget:
         container = QWidget(self)
         layout = QVBoxLayout(container)
@@ -446,6 +515,7 @@ class ExecuteTab(QWidget):
         )
         self._worker.finished.connect(self._on_synthesis_finished)
         self._worker.error.connect(self._on_synthesis_error)
+        self._worker.progress.connect(self._append_log)
         self._worker.start()
 
     def _set_processing_state(self, is_processing: bool) -> None:
@@ -486,4 +556,18 @@ class ExecuteTab(QWidget):
         path = item.data(Qt.UserRole)
         if isinstance(path, Path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+    
+    def _append_log(self, message: str) -> None:
+        """Append log message to the log text area."""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_message = f"[{timestamp}] {message}"
+        self._log_text.append(formatted_message)
+        # Auto-scroll to bottom
+        scrollbar = self._log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+    
+    def _clear_log(self) -> None:
+        """Clear the log text area."""
+        self._log_text.clear()
 
