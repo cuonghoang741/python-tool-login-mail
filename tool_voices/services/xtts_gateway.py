@@ -69,6 +69,38 @@ class XTTSModelGateway:
             # Temporarily patch torch.load
             torch.load = patched_load
             
+            # Auto-accept license agreement by patching input() function
+            # This allows automatic model download without manual confirmation
+            # Works with both run_app.bat (Windows) and run_app.sh (Mac/Linux)
+            import builtins
+            import logging
+            import sys
+            logger = logging.getLogger(__name__)
+            original_input = builtins.input
+            
+            def auto_accept_input(prompt=""):
+                """Auto-accept license agreement by returning 'y' for license prompts."""
+                prompt_lower = prompt.lower()
+                # Check if this is a license confirmation prompt
+                if any(keyword in prompt_lower for keyword in [
+                    "commercial license",
+                    "non-commercial cpml",
+                    "agree to the terms",
+                    "coqui",
+                    "[y/n]"
+                ]):
+                    logger.info("Tự động chấp nhận license agreement cho XTTS-v2 model")
+                    # Print to both stdout and stderr to ensure visibility in batch files
+                    message = "✓ Tự động chấp nhận license agreement (non-commercial CPML)"
+                    print(message, file=sys.stdout)
+                    print(message, file=sys.stderr)
+                    return "y"
+                # For other prompts, use original input (though shouldn't happen in this context)
+                return original_input(prompt)
+            
+            # Patch input function
+            builtins.input = auto_accept_input
+            
             try:
                 self._tts = TTS(
                     model_name=self._model_name,
@@ -82,8 +114,9 @@ class XTTSModelGateway:
                     "Vui lòng kiểm tra kết nối internet để tải model."
                 ) from e
             finally:
-                # Restore original torch.load
+                # Restore original functions
                 torch.load = original_load
+                builtins.input = original_input
         return self._tts
 
     def compute_conditioning_latent(self, audio_path: str) -> Tuple[object, object]:

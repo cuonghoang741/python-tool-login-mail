@@ -10,7 +10,7 @@ import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -52,6 +52,29 @@ class VoiceSynthesisService:
         self._output_dir: Path = (output_dir or Path("./outputs")).resolve()
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._logger = logging.getLogger(__name__)
+        self._log_callback: Optional[Callable[[str], None]] = None
+    
+    def set_log_callback(self, callback: Optional[Callable[[str], None]]) -> None:
+        """Set callback function to receive log messages for UI display."""
+        self._log_callback = callback
+    
+    def _log(self, message: str, level: str = "info") -> None:
+        """Log message both to logger and UI callback."""
+        if level == "info":
+            self._logger.info(message)
+        elif level == "warning":
+            self._logger.warning(message)
+        elif level == "error":
+            self._logger.error(message)
+        else:
+            self._logger.debug(message)
+        
+        # Send to UI callback if available
+        if self._log_callback:
+            try:
+                self._log_callback(message)
+            except Exception:
+                pass  # Ignore callback errors to avoid breaking synthesis
 
     def synthesize(
         self,
@@ -70,13 +93,23 @@ class VoiceSynthesisService:
         language = self._select_language(voice, text)
         destination = output_path or self._build_output_path(voice_name, emotion)
 
+        self._log("🔧 Đang tải conditioning latents...")
         gpt_latent, speaker_embedding = self._load_conditionings(voice)
+        self._log("✅ Đã tải conditioning latents")
+        
+        self._log("⚙️ Đang chuẩn bị inference parameters...")
         inference_kwargs = self._prepare_inference_kwargs(
             emotion, intensity, advanced_params or {}
         )
+        self._log("✅ Đã chuẩn bị inference parameters")
         
         # Check if text needs to be split into chunks
         text_chunks = self._split_text_into_chunks(text, language)
+        
+        self._log(
+            f"📊 Phân tích: {len(text)} ký tự → {len(text_chunks)} chunk(s), "
+            f"Ngôn ngữ: {language}"
+        )
         
         self._logger.info(
             "Synthesizing %s chars (%d chunks) with voice '%s' (emotion=%s, intensity=%.2f, language=%s)",
@@ -94,6 +127,7 @@ class VoiceSynthesisService:
         
         # If only one chunk, process normally
         if len(text_chunks) == 1:
+            self._log("🔄 Xử lý 1 chunk duy nhất...")
             audio = self._run_inference(
                 text=text_chunks[0],
                 language=language,
@@ -101,6 +135,7 @@ class VoiceSynthesisService:
                 speaker_embedding=speaker_embedding,
                 **inference_kwargs,
             )
+            self._log("✅ Hoàn tất xử lý chunk")
         else:
             # Process multiple chunks in parallel and concatenate
             sample_rate = self._resolve_sample_rate()
@@ -108,6 +143,7 @@ class VoiceSynthesisService:
             # Use parallel processing if max_workers > 1
             # Note: With lock, parallel processing may not be much faster, but still useful for I/O bound operations
             if max_workers > 1 and len(text_chunks) > 1:
+                self._log(f"⚡ Xử lý song song: {len(text_chunks)} chunks với {max_workers} workers")
                 try:
                     audio_chunks = self._process_chunks_parallel(
                         text_chunks,
@@ -118,10 +154,12 @@ class VoiceSynthesisService:
                         max_workers,
                     )
                 except Exception as e:
+                    self._log(f"⚠️ Xử lý song song thất bại, chuyển sang tuần tự: {str(e)}", "warning")
                     self._logger.error("Parallel processing failed, falling back to sequential: %s", e)
                     # Fallback to sequential processing on error
                     audio_chunks = []
                     for i, chunk in enumerate(text_chunks):
+                        self._log(f"📝 Chunk {i + 1}/{len(text_chunks)}: {len(chunk)} ký tự")
                         self._logger.info("Processing chunk %d/%d (%d chars)", i + 1, len(text_chunks), len(chunk))
                         chunk_audio = self._run_inference(
                             text=chunk,
@@ -131,10 +169,13 @@ class VoiceSynthesisService:
                             **inference_kwargs,
                         )
                         audio_chunks.append(chunk_audio)
+                        self._log(f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)}")
             else:
                 # Sequential processing
+                self._log(f"📝 Xử lý tuần tự: {len(text_chunks)} chunks")
                 audio_chunks = []
                 for i, chunk in enumerate(text_chunks):
+                    self._log(f"📝 Chunk {i + 1}/{len(text_chunks)}: {len(chunk)} ký tự")
                     self._logger.info("Processing chunk %d/%d (%d chars)", i + 1, len(text_chunks), len(chunk))
                     chunk_audio = self._run_inference(
                         text=chunk,
@@ -144,20 +185,29 @@ class VoiceSynthesisService:
                         **inference_kwargs,
                     )
                     audio_chunks.append(chunk_audio)
+                    self._log(f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)}")
             
             # Concatenate all audio chunks in order
+            self._log(f"🔗 Đang ghép {len(audio_chunks)} chunks thành audio cuối cùng...")
             audio = np.concatenate(audio_chunks)
             self._logger.info("Concatenated %d audio chunks into final audio", len(audio_chunks))
+            self._log(f"✅ Đã ghép xong {len(audio_chunks)} chunks")
         
         sample_rate = self._resolve_sample_rate()
+        self._log(f"💾 Đang ghi file audio: {destination.name}")
         self._write_wav(audio, sample_rate, destination)
         self._logger.info("Audio written to %s", destination)
+        self._log(f"✅ Đã ghi file thành công: {destination.name}")
         return destination
 
     def _load_voice(self, voice_name: str) -> VoiceProfile:
+        self._log(f"📂 Đang tải giọng: {voice_name}")
         voice = self._repository.load_voice(voice_name)
         if voice is None:
-            raise ValueError(f"Giọng '{voice_name}' không tồn tại.")
+            error_msg = f"Giọng '{voice_name}' không tồn tại."
+            self._log(error_msg, "error")
+            raise ValueError(error_msg)
+        self._log(f"✅ Đã tải giọng: {voice_name}")
         return voice
 
     def _load_conditionings(self, voice: VoiceProfile) -> Tuple[object, object]:
@@ -335,7 +385,9 @@ class VoiceSynthesisService:
         # PyTorch models in eval() mode are generally thread-safe for inference
         # Each inference call is independent and doesn't modify model weights
         # If errors occur, we'll catch and handle them
+        self._log("🤖 Đang chạy inference (có thể mất vài giây)...")
         result = tts_model.inference(**kwargs)
+        self._log("✅ Inference hoàn tất")
         if isinstance(result, dict):
             # Avoid using 'or' with arrays/tensors - check explicitly
             audio = result.get("wav")
@@ -648,9 +700,11 @@ class VoiceSynthesisService:
         def process_chunk(chunk_data: Tuple[int, str]) -> Tuple[int, np.ndarray]:
             import time
             chunk_idx, chunk_text = chunk_data
-            start_time = time.time()
+            chunk_start_time = time.time()
+            worker_id = threading.current_thread().ident
+            self._log(f"🔄 [Worker {worker_id}] Bắt đầu chunk {chunk_idx + 1}/{len(text_chunks)} ({len(chunk_text)} ký tự)")
             self._logger.info("[Worker %d] Starting chunk %d/%d (%d chars)", 
-                            threading.current_thread().ident, chunk_idx + 1, len(text_chunks), len(chunk_text))
+                            worker_id, chunk_idx + 1, len(text_chunks), len(chunk_text))
             try:
                 chunk_audio = self._run_inference(
                     text=chunk_text,
@@ -659,14 +713,17 @@ class VoiceSynthesisService:
                     speaker_embedding=speaker_embedding,
                     **inference_kwargs,
                 )
-                elapsed = time.time() - start_time
+                elapsed = time.time() - chunk_start_time
+                self._log(f"✅ [Worker {worker_id}] Hoàn tất chunk {chunk_idx + 1}/{len(text_chunks)} trong {elapsed:.2f}s")
                 self._logger.info("[Worker %d] Completed chunk %d/%d in %.2fs", 
-                                threading.current_thread().ident, chunk_idx + 1, len(text_chunks), elapsed)
+                                worker_id, chunk_idx + 1, len(text_chunks), elapsed)
                 return chunk_idx, chunk_audio
             except Exception as e:
-                elapsed = time.time() - start_time
+                elapsed = time.time() - chunk_start_time
+                error_msg = f"[Worker {worker_id}] Lỗi chunk {chunk_idx + 1}/{len(text_chunks)} sau {elapsed:.2f}s: {str(e)}"
+                self._log(error_msg, "error")
                 self._logger.error("[Worker %d] Failed chunk %d/%d after %.2fs: %s", 
-                                 threading.current_thread().ident, chunk_idx + 1, len(text_chunks), elapsed, e)
+                                 worker_id, chunk_idx + 1, len(text_chunks), elapsed, e)
                 raise
         
         # Process chunks in parallel
@@ -686,10 +743,12 @@ class VoiceSynthesisService:
                     chunk_idx, chunk_audio = future.result()
                     audio_results[chunk_idx] = chunk_audio
                     completed += 1
+                    self._log(f"📊 Tiến độ: {completed}/{len(text_chunks)} chunks đã hoàn tất")
                     self._logger.info("Completed chunk %d/%d", completed, len(text_chunks))
                 except Exception as e:
                     chunk_idx = future_to_chunk[future]
                     error_msg = f"Lỗi khi xử lý chunk {chunk_idx + 1}/{len(text_chunks)}: {str(e)}"
+                    self._log(error_msg, "error")
                     self._logger.error("Error processing chunk %d: %s", chunk_idx + 1, e, exc_info=True)
                     errors.append(error_msg)
                     # Cancel remaining futures
@@ -712,6 +771,7 @@ class VoiceSynthesisService:
         # Reconstruct audio chunks in original order
         audio_chunks = [audio_results[i] for i in range(len(text_chunks))]
         total_time = time.time() - start_time
+        self._log(f"🎉 Tất cả {len(text_chunks)} chunks hoàn tất trong {total_time:.2f}s (xử lý song song)")
         self._logger.info("All %d chunks completed in %.2fs (parallel processing)", len(text_chunks), total_time)
         return audio_chunks
 
