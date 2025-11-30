@@ -89,6 +89,12 @@ class VoiceSynthesisService:
         if not text.strip():
             raise ValueError("Văn bản đầu vào không được để trống.")
 
+        # Check if using default voice
+        if voice_name.startswith("default:"):
+            return self._synthesize_with_default_voice(
+                text, voice_name, emotion, intensity, output_path, advanced_params
+            )
+
         voice = self._load_voice(voice_name)
         language = self._select_language(voice, text)
         destination = output_path or self._build_output_path(voice_name, emotion)
@@ -435,6 +441,177 @@ class VoiceSynthesisService:
         voice_slug = self._slugify(voice_name)
         emotion_slug = self._slugify(emotion)
         return self._output_dir / f"{voice_slug}_{emotion_slug}_{timestamp}.wav"
+
+    def _synthesize_with_default_voice(
+        self,
+        text: str,
+        voice_name: str,
+        emotion: str,
+        intensity: float,
+        output_path: Optional[Path] = None,
+        advanced_params: Optional[Dict[str, object]] = None,
+    ) -> Path:
+        """Synthesize using default XTTS voice by creating default conditioning latents."""
+        # Extract language code (e.g., "default:en" -> "en")
+        language = voice_name.replace("default:", "")
+        
+        # Validate language
+        supported_languages = self._get_supported_languages()
+        if language not in supported_languages:
+            # Fallback to English if language not supported
+            self._logger.warning(f"Language '{language}' not supported, using 'en'")
+            language = "en"
+        
+        # Auto-detect language from text if needed
+        if language == "en":
+            if self._looks_vietnamese(text):
+                language = "vi" if "vi" in self._get_supported_languages() else "en"
+            elif self._looks_spanish(text):
+                language = "es" if "es" in self._get_supported_languages() else "en"
+        
+        destination = output_path or self._build_output_path(f"default_{language}", emotion)
+        
+        self._log(f"🎤 Sử dụng default voice (neutral) cho ngôn ngữ: {language}")
+        self._log(f"🌐 Ngôn ngữ: {language}")
+        
+        try:
+            # Create default conditioning latents using model's default speaker
+            # We'll use a neutral/default speaker embedding
+            self._log("🔧 Đang tạo default conditioning latents...")
+            gpt_latent, speaker_embedding = self._create_default_conditionings()
+            self._log("✅ Đã tạo default conditioning latents")
+            
+            # Prepare inference parameters
+            self._log("⚙️ Đang chuẩn bị inference parameters...")
+            inference_kwargs = self._prepare_inference_kwargs(
+                emotion, intensity, advanced_params or {}
+            )
+            self._log("✅ Đã chuẩn bị inference parameters")
+            
+            # Split text into chunks if needed
+            text_chunks = self._split_text_into_chunks(text, language)
+            
+            self._log(
+                f"📊 Phân tích: {len(text)} ký tự → {len(text_chunks)} chunk(s), "
+                f"Ngôn ngữ: {language}"
+            )
+            
+            # Process chunks
+            if len(text_chunks) == 1:
+                self._log("🔄 Xử lý 1 chunk duy nhất...")
+                audio = self._run_inference(
+                    text=text_chunks[0],
+                    language=language,
+                    gpt_cond_latent=gpt_latent,
+                    speaker_embedding=speaker_embedding,
+                    **inference_kwargs,
+                )
+                self._log("✅ Hoàn tất xử lý chunk")
+            else:
+                # Process multiple chunks sequentially
+                self._log(f"📝 Xử lý tuần tự: {len(text_chunks)} chunks")
+                sample_rate = self._resolve_sample_rate()
+                audio_chunks = []
+                for i, chunk in enumerate(text_chunks):
+                    self._log(f"📝 Chunk {i + 1}/{len(text_chunks)}: {len(chunk)} ký tự")
+                    chunk_audio = self._run_inference(
+                        text=chunk,
+                        language=language,
+                        gpt_cond_latent=gpt_latent,
+                        speaker_embedding=speaker_embedding,
+                        **inference_kwargs,
+                    )
+                    audio_chunks.append(chunk_audio)
+                    self._log(f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)}")
+                
+                # Concatenate audio chunks
+                self._log("🔗 Đang nối các chunks...")
+                audio = np.concatenate(audio_chunks)
+            
+            # Write to file
+            sample_rate = self._resolve_sample_rate()
+            self._write_wav(audio, sample_rate, destination)
+            self._log(f"✅ Đã ghi file thành công: {destination.name}")
+            return destination
+            
+        except Exception as e:
+            error_msg = f"Lỗi khi sử dụng default voice: {str(e)}"
+            self._log(error_msg, "error")
+            self._logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
+    
+    def _create_default_conditionings(self) -> Tuple[object, object]:
+        """Create default conditioning latents for default voice using a generated audio sample."""
+        try:
+            # Create a simple audio sample (sine wave) to use as reference
+            # This ensures we get proper conditioning latents with correct shapes
+            import numpy as np
+            import tempfile
+            import os
+            import wave
+            
+            sample_rate = 24000
+            duration = 1.0  # 1 second of audio
+            frequency = 440.0  # A4 note (neutral tone)
+            
+            # Generate a simple sine wave
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            audio = np.sin(2 * np.pi * frequency * t).astype(np.float32)
+            
+            # Normalize and convert to int16
+            audio = np.clip(audio, -1.0, 1.0)
+            audio_int16 = (audio * 32767).astype(np.int16)
+            
+            # Save to temporary file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+                # Write WAV file
+                with wave.open(tmp_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_int16.tobytes())
+            
+            # Use this audio to create conditioning latents (same as trained voices)
+            # This ensures correct shapes and proper conditioning
+            gpt_latent, speaker_embedding = self._gateway.compute_conditioning_latent(tmp_path)
+            
+            # Clean up temp file
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            
+            return gpt_latent, speaker_embedding
+            
+        except Exception as e:
+            # Fallback: try to get shape from an existing voice or use model defaults
+            self._logger.warning(f"Could not create default conditionings from audio: {e}")
+            try:
+                # Try to load a voice to get correct shapes
+                voices = self._repository.list_voices()
+                if voices:
+                    # Use first available voice to get correct shape
+                    voice = self._repository.load_voice(voices[0])
+                    if voice and voice.samples:
+                        gpt_latent, speaker_embedding = self._gateway.compute_conditioning_latent(
+                            str(voice.samples[0])
+                        )
+                        # Use zeros to create a neutral version (average out)
+                        torch = self._gateway.torch
+                        device = speaker_embedding.device
+                        # Create neutral latents by using very small values
+                        gpt_latent = torch.zeros_like(gpt_latent)
+                        speaker_embedding = torch.zeros_like(speaker_embedding)
+                        return gpt_latent, speaker_embedding
+            except Exception as e2:
+                self._logger.error(f"Fallback also failed: {e2}")
+            
+            # Last resort: raise error with helpful message
+            raise RuntimeError(
+                "Could not create default voice conditionings. "
+                "Please train at least one voice first, or ensure TTS model is properly loaded."
+            ) from e
 
     def _select_language(self, voice: VoiceProfile, text: str) -> str:
         # Get supported languages from model

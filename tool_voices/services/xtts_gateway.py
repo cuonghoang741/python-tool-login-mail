@@ -100,31 +100,65 @@ class XTTSModelGateway:
             # Works with both run_app.bat (Windows) and run_app.sh (Mac/Linux)
             import builtins
             import logging
-            import sys
             logger = logging.getLogger(__name__)
             original_input = builtins.input
             
+            # Set environment variable to auto-accept license (if TTS supports it)
+            os.environ.setdefault("TTS_ACCEPT_LICENSE", "y")
+            os.environ.setdefault("COQUI_TTS_ACCEPT_LICENSE", "y")
+            
             def auto_accept_input(prompt=""):
-                """Auto-accept license agreement by returning 'y' for license prompts."""
+                """Auto-accept license agreement by returning 'y' for ALL prompts during TTS init."""
                 prompt_lower = prompt.lower()
+                prompt_stripped = prompt.strip()
+                
+                # Always log the prompt for debugging
+                if prompt_stripped:
+                    logger.debug(f"TTS prompt: {prompt_stripped[:100]}")
+                
                 # Check if this is a license confirmation prompt
-                if any(keyword in prompt_lower for keyword in [
+                # Match various license prompt formats
+                license_keywords = [
                     "commercial license",
                     "non-commercial cpml",
                     "agree to the terms",
                     "coqui",
-                    "[y/n]"
-                ]):
+                    "cpml",
+                    "licensing@coqui.ai",
+                    "coqui.ai/cpml",
+                    "[y/n]",
+                    "y/n",
+                    "purchased a commercial license",
+                    "otherwise, i agree",
+                    "i have purchased",
+                    "i agree"
+                ]
+                
+                # Check for license-related keywords
+                if any(keyword in prompt_lower for keyword in license_keywords):
                     logger.info("Tự động chấp nhận license agreement cho XTTS-v2 model")
-                    # Print to both stdout and stderr to ensure visibility in batch files
                     message = "✓ Tự động chấp nhận license agreement (non-commercial CPML)"
                     print(message, file=sys.stdout)
                     print(message, file=sys.stderr)
                     return "y"
-                # For other prompts, use original input (though shouldn't happen in this context)
-                return original_input(prompt)
+                
+                # Check if prompt is empty, just ">", or starts with "| >" (common in interactive prompts)
+                if (not prompt_stripped or 
+                    prompt_stripped == ">" or 
+                    prompt_stripped.startswith("| >") or
+                    prompt_stripped.startswith(">") or
+                    prompt_stripped == "|"):
+                    # This is a continuation prompt during TTS initialization, auto-accept
+                    logger.debug(f"Auto-accepting continuation prompt: '{prompt}'")
+                    return "y"
+                
+                # For ANY prompt during TTS initialization, auto-accept to avoid blocking
+                # This ensures smooth model download without user interaction
+                # The prompt might be printed separately before input() is called
+                logger.info(f"Tự động chấp nhận prompt trong quá trình khởi tạo TTS: '{prompt_stripped[:80]}...'")
+                return "y"
             
-            # Patch input function
+            # Patch input function BEFORE creating TTS instance
             builtins.input = auto_accept_input
             
             try:

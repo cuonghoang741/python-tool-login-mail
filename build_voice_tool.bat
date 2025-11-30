@@ -92,27 +92,85 @@ if exist "build" (
 
 echo.
 
-REM 6. Chạy PyInstaller với file spec sẵn có: tool_voices.spec
-echo [6/6] Build .exe bằng PyInstaller (tool_voices.spec)...
-python -m PyInstaller --clean --noconfirm tool_voices.spec
+REM 6. Build launcher đơn giản (không cần TTS)
+echo [6/8] Build launcher .exe bằng PyInstaller (tool_voices_launcher.spec)...
+python -m PyInstaller --clean --noconfirm tool_voices_launcher.spec
 if errorlevel 1 (
     echo.
     echo ========================================
-    echo [ERROR] Build thất bại!
+    echo [ERROR] Build launcher thất bại!
     echo Kiểm tra:
-    echo 1. Đã cài đúng các thư viện trong requirements_voice.txt chưa
-    echo 2. Đã đóng tất cả ToolVoiceCloning.exe đang chạy chưa
-    echo 3. Thử chạy lại với quyền Administrator
+    echo 1. Đã đóng tất cả ToolVoiceCloning.exe đang chạy chưa
+    echo 2. Thử chạy lại với quyền Administrator
     echo ========================================
     echo.
     pause
     exit /b 1
 )
+echo [OK] Đã build launcher thành công
+echo.
+
+REM 7. Copy venv_voice vào dist
+echo [7/8] Đóng gói venv_voice vào thư mục dist...
+if not exist "dist\ToolVoiceCloning" (
+    echo [ERROR] Thư mục dist\ToolVoiceCloning không tồn tại!
+    pause
+    exit /b 1
+)
+
+if not exist "venv_voice" (
+    echo [ERROR] venv_voice không tồn tại!
+    pause
+    exit /b 1
+)
+
+echo Đang copy venv_voice (quá trình này có thể mất vài phút)...
+xcopy /E /I /Y "venv_voice" "dist\ToolVoiceCloning\venv_voice" >nul
+if errorlevel 1 (
+    echo [WARNING] Có lỗi khi copy venv_voice, thử lại...
+    timeout /t 2 /nobreak >nul
+    xcopy /E /I /Y "venv_voice" "dist\ToolVoiceCloning\venv_voice"
+    if errorlevel 1 (
+        echo [ERROR] Không thể copy venv_voice!
+        pause
+        exit /b 1
+    )
+)
+echo [OK] Đã copy venv_voice
+echo.
+
+REM 8. Copy tool_voices và các file cần thiết
+echo [8/8] Copy tool_voices và các file cần thiết...
+xcopy /E /I /Y "tool_voices" "dist\ToolVoiceCloning\tool_voices" >nul
+if exist "config" (
+    xcopy /E /I /Y "config" "dist\ToolVoiceCloning\config" >nul
+)
+if exist "voices" (
+    xcopy /E /I /Y "voices" "dist\ToolVoiceCloning\voices" >nul
+)
+if exist "outputs" (
+    if not exist "dist\ToolVoiceCloning\outputs" mkdir "dist\ToolVoiceCloning\outputs"
+)
+if exist "logs" (
+    if not exist "dist\ToolVoiceCloning\logs" mkdir "dist\ToolVoiceCloning\logs"
+)
+echo [OK] Đã copy các file cần thiết
+echo.
 
 echo.
 echo ========================================
 echo  BUILD THÀNH CÔNG!
-echo  File exe: dist\ToolVoiceCloning\ToolVoiceCloning.exe
 echo ========================================
+echo.
+echo Cấu trúc thư mục dist\ToolVoiceCloning:
+echo   - ToolVoiceCloning.exe (launcher)
+echo   - venv_voice\ (virtual environment với TTS)
+echo   - tool_voices\ (source code)
+echo   - config\ (nếu có)
+echo   - voices\ (nếu có)
+echo.
+echo Bạn có thể phân phối toàn bộ thư mục dist\ToolVoiceCloning
+echo cho người dùng khác. Họ chỉ cần double-click ToolVoiceCloning.exe
+echo để chạy ứng dụng.
 echo.
 pause

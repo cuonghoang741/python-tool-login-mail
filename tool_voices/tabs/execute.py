@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import QThread, QUrl, Qt, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,6 +27,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+import os
+import subprocess
+import platform
 
 from tool_voices.domain import default_emotions
 from tool_voices.services.voice_clone import VoiceCloneService
@@ -160,6 +163,44 @@ class ExecuteTab(QWidget):
         form.setVerticalSpacing(12)
 
         self._voice_combo = QComboBox(container)
+        self._use_default_voice_checkbox = QCheckBox("Use Default Voice (Neutral)", container)
+        self._use_default_voice_checkbox.setToolTip(
+            "Enable to use neutral/default voice for the selected language.\n"
+            "Note: XTTS-v2 requires reference audio, so this uses a neutral speaker embedding.\n"
+            "For better results, train a voice using the 'Upload & Train' tab."
+        )
+        self._default_voice_combo = QComboBox(container)
+        self._default_voice_combo.setEnabled(False)
+        self._default_voice_combo.setVisible(False)
+        
+        # Populate default voices (XTTS supported languages)
+        # Note: XTTS-v2 doesn't have built-in default voices - it requires reference audio
+        # These are language options that will use a neutral/default speaker embedding
+        default_voices = [
+            ("English (en)", "en"),
+            ("Spanish (es)", "es"),
+            ("French (fr)", "fr"),
+            ("German (de)", "de"),
+            ("Italian (it)", "it"),
+            ("Portuguese (pt)", "pt"),
+            ("Polish (pl)", "pl"),
+            ("Turkish (tr)", "tr"),
+            ("Russian (ru)", "ru"),
+            ("Dutch (nl)", "nl"),
+            ("Czech (cs)", "cs"),
+            ("Arabic (ar)", "ar"),
+            ("Chinese (zh-cn)", "zh-cn"),
+            ("Hungarian (hu)", "hu"),
+            ("Korean (ko)", "ko"),
+            ("Japanese (ja)", "ja"),
+            ("Hindi (hi)", "hi"),
+            ("Vietnamese (vi)", "vi"),
+        ]
+        for label, code in default_voices:
+            self._default_voice_combo.addItem(label, code)
+        
+        self._use_default_voice_checkbox.toggled.connect(self._on_default_voice_toggled)
+        
         self._emotion_combo = QComboBox(container)
 
         self._intensity_slider = QSlider(Qt.Horizontal, container)
@@ -206,7 +247,35 @@ class ExecuteTab(QWidget):
         workers_widget = QWidget(container)
         workers_widget.setLayout(workers_layout)
 
-        form.addRow("Giọng đã clone", self._voice_combo)
+        # Voice selection with default voice option
+        voice_label = QLabel("Voice:", container)
+        voice_layout = QVBoxLayout()
+        voice_layout.setSpacing(8)
+        
+        # Checkbox for default voice
+        voice_layout.addWidget(self._use_default_voice_checkbox)
+        
+        # Trained voice combo (shown when default is off)
+        trained_voice_layout = QHBoxLayout()
+        trained_voice_layout.addWidget(QLabel("Trained Voice:", container))
+        trained_voice_layout.addWidget(self._voice_combo)
+        trained_voice_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+        trained_voice_widget = QWidget(container)
+        trained_voice_widget.setLayout(trained_voice_layout)
+        voice_layout.addWidget(trained_voice_widget)
+        
+        # Default voice combo (shown when default is on)
+        default_voice_layout = QHBoxLayout()
+        default_voice_layout.addWidget(QLabel("Default Voice:", container))
+        default_voice_layout.addWidget(self._default_voice_combo)
+        default_voice_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+        default_voice_widget = QWidget(container)
+        default_voice_widget.setLayout(default_voice_layout)
+        voice_layout.addWidget(default_voice_widget)
+        
+        voice_widget = QWidget(container)
+        voice_widget.setLayout(voice_layout)
+        form.addRow(voice_label, voice_widget)
         
         # Emotion selection with info
         emotion_label = QLabel("Cảm xúc:", container)
@@ -444,6 +513,8 @@ class ExecuteTab(QWidget):
 
         self._outputs_list = QListWidget(container)
         self._outputs_list.itemActivated.connect(self._open_output_file)
+        self._outputs_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._outputs_list.customContextMenuRequested.connect(self._show_output_context_menu)
         layout.addWidget(self._outputs_list)
 
         return container
@@ -461,6 +532,13 @@ class ExecuteTab(QWidget):
 
     def _update_intensity_label(self, value: int) -> None:
         self._intensity_label.setText(f"Intensity: {value / 100:.2f}")
+    
+    def _on_default_voice_toggled(self, checked: bool) -> None:
+        """Handle toggle of default voice checkbox."""
+        self._voice_combo.setEnabled(not checked)
+        self._voice_combo.setVisible(not checked)
+        self._default_voice_combo.setEnabled(checked)
+        self._default_voice_combo.setVisible(checked)
 
     def _handle_generate_audio(self) -> None:
         text = self._text_input.toPlainText().strip()
@@ -468,6 +546,12 @@ class ExecuteTab(QWidget):
             self._status_label.setText("Vui lòng nhập văn bản cần đọc.")
             return
 
+        # Determine which voice to use
+        use_default = self._use_default_voice_checkbox.isChecked()
+        if use_default:
+            default_voice_data = self._default_voice_combo.currentData()
+            voice = f"default:{default_voice_data}" if default_voice_data else "default:en"
+        else:
         voice = self._voice_combo.currentText()
         emotion_data = self._emotion_combo.currentData()
         emotion_key = emotion_data.key if emotion_data else "neutral"
@@ -553,9 +637,94 @@ class ExecuteTab(QWidget):
         self._outputs_list.scrollToItem(item)
 
     def _open_output_file(self, item: QListWidgetItem) -> None:
+        """Open the output file (double-click)."""
         path = item.data(Qt.UserRole)
-        if isinstance(path, Path):
+        if isinstance(path, Path) and path.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+    
+    def _show_output_context_menu(self, position) -> None:
+        """Show context menu for output file with actions."""
+        item = self._outputs_list.itemAt(position)
+        if not item:
+            return
+        
+        path = item.data(Qt.UserRole)
+        if not isinstance(path, Path) or not path.exists():
+            return
+        
+        from PySide6.QtWidgets import QMenu
+        
+        menu = QMenu(self)
+        
+        # Open file action
+        open_action = menu.addAction("📂 Mở file")
+        open_action.triggered.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))))
+        
+        # Open folder action
+        open_folder_action = menu.addAction("📁 Mở folder")
+        open_folder_action.triggered.connect(lambda: self._open_output_folder(path))
+        
+        # Play audio action
+        play_action = menu.addAction("▶️ Phát audio")
+        play_action.triggered.connect(lambda: self._play_audio(path))
+        
+        menu.addSeparator()
+        
+        # Delete action
+        delete_action = menu.addAction("🗑️ Xóa file")
+        delete_action.triggered.connect(lambda: self._delete_output_file(item, path))
+        
+        menu.exec_(self._outputs_list.mapToGlobal(position))
+    
+    def _open_output_folder(self, path: Path) -> None:
+        """Open the folder containing the output file."""
+        if path.exists():
+            folder_path = path.parent
+            if platform.system() == 'Windows':
+                os.startfile(str(folder_path))
+            elif platform.system() == 'Darwin':  # macOS
+                subprocess.run(['open', str(folder_path)])
+            else:  # Linux
+                subprocess.run(['xdg-open', str(folder_path)])
+    
+    def _play_audio(self, path: Path) -> None:
+        """Play the audio file using system default player."""
+        if not path.exists():
+            QMessageBox.warning(self, "Lỗi", f"File không tồn tại: {path}")
+            return
+        
+        try:
+            if platform.system() == 'Windows':
+                os.startfile(str(path))
+            elif platform.system() == 'Darwin':  # macOS
+                subprocess.run(['open', str(path)])
+            else:  # Linux
+                subprocess.run(['xdg-open', str(path)])
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi", f"Không thể phát audio: {str(e)}")
+    
+    def _delete_output_file(self, item: QListWidgetItem, path: Path) -> None:
+        """Delete the output file after confirmation."""
+        reply = QMessageBox.question(
+            self,
+            "Xác nhận xóa",
+            f"Bạn có chắc muốn xóa file:\n{path.name}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                if path.exists():
+                    path.unlink()
+                    # Remove item from list
+                    row = self._outputs_list.row(item)
+                    self._outputs_list.takeItem(row)
+                    QMessageBox.information(self, "Thành công", "Đã xóa file thành công.")
+                else:
+                    QMessageBox.warning(self, "Lỗi", "File không tồn tại.")
+            except Exception as e:
+                QMessageBox.critical(self, "Lỗi", f"Không thể xóa file: {str(e)}")
     
     def _append_log(self, message: str) -> None:
         """Append log message to the log text area."""
