@@ -97,27 +97,18 @@ class XTTSModelGateway:
             
             # Auto-accept license agreement by patching input() function
             # This allows automatic model download without manual confirmation
-            # Works with both run_app.bat (Windows) and run_app.sh (Mac/Linux)
             import builtins
             import logging
             logger = logging.getLogger(__name__)
             original_input = builtins.input
             
-            # Set environment variable to auto-accept license (if TTS supports it)
-            os.environ.setdefault("TTS_ACCEPT_LICENSE", "y")
-            os.environ.setdefault("COQUI_TTS_ACCEPT_LICENSE", "y")
-            
             def auto_accept_input(prompt=""):
-                """Auto-accept license agreement by returning 'y' for ALL prompts during TTS init."""
+                """Auto-accept license agreement by returning 'y' for license prompts."""
                 prompt_lower = prompt.lower()
-                prompt_stripped = prompt.strip()
-                
-                # Always log the prompt for debugging
-                if prompt_stripped:
-                    logger.debug(f"TTS prompt: {prompt_stripped[:100]}")
+                prompt_text = prompt.strip()
                 
                 # Check if this is a license confirmation prompt
-                # Match various license prompt formats
+                # Match various license prompt patterns
                 license_keywords = [
                     "commercial license",
                     "non-commercial cpml",
@@ -125,40 +116,33 @@ class XTTSModelGateway:
                     "coqui",
                     "cpml",
                     "licensing@coqui.ai",
-                    "coqui.ai/cpml",
                     "[y/n]",
                     "y/n",
                     "purchased a commercial license",
                     "otherwise, i agree",
-                    "i have purchased",
-                    "i agree"
                 ]
                 
-                # Check for license-related keywords
-                if any(keyword in prompt_lower for keyword in license_keywords):
+                # Also check for prompts that contain license-related text
+                is_license_prompt = (
+                    any(keyword in prompt_lower for keyword in license_keywords) or
+                    "purchased a commercial license" in prompt_lower or
+                    "otherwise, i agree" in prompt_lower or
+                    ("coqui" in prompt_lower and ("license" in prompt_lower or "cpml" in prompt_lower)) or
+                    (len(prompt_text) > 30 and "[y/n]" in prompt_text)
+                )
+                
+                if is_license_prompt:
                     logger.info("Tự động chấp nhận license agreement cho XTTS-v2 model")
+                    # Print to both stdout and stderr to ensure visibility
                     message = "✓ Tự động chấp nhận license agreement (non-commercial CPML)"
                     print(message, file=sys.stdout)
                     print(message, file=sys.stderr)
                     return "y"
                 
-                # Check if prompt is empty, just ">", or starts with "| >" (common in interactive prompts)
-                if (not prompt_stripped or 
-                    prompt_stripped == ">" or 
-                    prompt_stripped.startswith("| >") or
-                    prompt_stripped.startswith(">") or
-                    prompt_stripped == "|"):
-                    # This is a continuation prompt during TTS initialization, auto-accept
-                    logger.debug(f"Auto-accepting continuation prompt: '{prompt}'")
-                    return "y"
-                
-                # For ANY prompt during TTS initialization, auto-accept to avoid blocking
-                # This ensures smooth model download without user interaction
-                # The prompt might be printed separately before input() is called
-                logger.info(f"Tự động chấp nhận prompt trong quá trình khởi tạo TTS: '{prompt_stripped[:80]}...'")
-                return "y"
+                # For other prompts, use original input (though shouldn't happen in this context)
+                return original_input(prompt)
             
-            # Patch input function BEFORE creating TTS instance
+            # Patch input function
             builtins.input = auto_accept_input
             
             try:
@@ -208,5 +192,3 @@ class XTTSModelGateway:
             buffer,
         )
         return buffer.getvalue()
-
-

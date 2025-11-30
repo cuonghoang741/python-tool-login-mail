@@ -142,34 +142,39 @@ class ExecuteTab(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 24, 32, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
 
         header = QLabel("Synthesize Speech")
-        header.setStyleSheet("font-size: 24px; font-weight: 600;")
+        header.setStyleSheet("font-size: 20px; font-weight: 600; margin-bottom: 8px;")
         layout.addWidget(header)
 
         layout.addWidget(self._build_form_section())
         layout.addWidget(self._build_action_bar())
         layout.addWidget(self._build_log_section())
         layout.addWidget(self._build_outputs_list())
-        layout.addStretch()
 
     def _build_form_section(self) -> QWidget:
         container = QWidget(self)
-        form = QFormLayout(container)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setHorizontalSpacing(16)
-        form.setVerticalSpacing(12)
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(10)
+        
+        # Voice and emotion group
+        voice_group = QGroupBox("Voice Settings", container)
+        voice_form = QFormLayout(voice_group)
+        voice_form.setContentsMargins(12, 12, 12, 12)
+        voice_form.setHorizontalSpacing(12)
+        voice_form.setVerticalSpacing(8)
 
-        self._voice_combo = QComboBox(container)
-        self._use_default_voice_checkbox = QCheckBox("Use Default Voice (Neutral)", container)
+        self._voice_combo = QComboBox(voice_group)
+        self._use_default_voice_checkbox = QCheckBox("Use Default Voice (Neutral)", voice_group)
         self._use_default_voice_checkbox.setToolTip(
             "Enable to use neutral/default voice for the selected language.\n"
             "Note: XTTS-v2 requires reference audio, so this uses a neutral speaker embedding.\n"
             "For better results, train a voice using the 'Upload & Train' tab."
         )
-        self._default_voice_combo = QComboBox(container)
+        self._default_voice_combo = QComboBox(voice_group)
         self._default_voice_combo.setEnabled(False)
         self._default_voice_combo.setVisible(False)
         
@@ -201,108 +206,94 @@ class ExecuteTab(QWidget):
         
         self._use_default_voice_checkbox.toggled.connect(self._on_default_voice_toggled)
         
-        self._emotion_combo = QComboBox(container)
+        self._emotion_combo = QComboBox(voice_group)
 
-        self._intensity_slider = QSlider(Qt.Horizontal, container)
+        self._intensity_slider = QSlider(Qt.Horizontal, voice_group)
         self._intensity_slider.setRange(0, 100)
         self._intensity_slider.setValue(50)
         self._intensity_slider.setTickPosition(QSlider.TicksBelow)
         self._intensity_slider.setTickInterval(10)
 
-        self._intensity_label = QLabel("Intensity: 0.50", container)
-        intensity_info = QLabel("(Ảnh hưởng: temperature, top_p, speed range)", container)
-        intensity_info.setStyleSheet("color: gray; font-size: 10px;")
-        intensity_info.setToolTip(
-            "Cường độ điều chỉnh độ mạnh của các thay đổi:\n"
-            "- Cao (1.0): temperature thấp hơn, top_p thấp hơn, speed range lớn hơn\n"
-            "- Thấp (0.0): temperature cao hơn, top_p cao hơn, speed range nhỏ hơn"
-        )
+        self._intensity_label = QLabel("0.50", voice_group)
+        self._intensity_label.setMinimumWidth(50)
+        self._intensity_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._intensity_slider.valueChanged.connect(self._update_intensity_label)
-
-        intensity_wrapper = QVBoxLayout()
-        intensity_wrapper.setSpacing(4)
-        intensity_wrapper.addWidget(self._intensity_slider)
-        intensity_wrapper.addWidget(self._intensity_label)
-        intensity_wrapper.addWidget(intensity_info)
-
-        intensity_widget = QWidget(container)
-        intensity_widget.setLayout(intensity_wrapper)
-
-        self._text_input = QTextEdit(container)
-        self._text_input.setPlaceholderText(
-            "Nhập nội dung cần đọc. Có thể là đoạn script dài."
-        )
-        self._text_input.setMinimumHeight(180)
-
-        # Parallel workers input
-        self._workers_spin = QSpinBox(container)
-        self._workers_spin.setRange(1, 8)
-        self._workers_spin.setValue(2)
-        self._workers_spin.setToolTip("Số lượng chunks xử lý đồng thời (1-8). Nhiều hơn = nhanh hơn nhưng tốn RAM hơn.")
-        workers_label = QLabel("Workers (song song):", container)
-        workers_layout = QHBoxLayout()
-        workers_layout.addWidget(workers_label)
-        workers_layout.addWidget(self._workers_spin)
-        workers_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
-        workers_widget = QWidget(container)
-        workers_widget.setLayout(workers_layout)
-
+        
         # Voice selection with default voice option
-        voice_label = QLabel("Voice:", container)
         voice_layout = QVBoxLayout()
-        voice_layout.setSpacing(8)
+        voice_layout.setSpacing(6)
         
         # Checkbox for default voice
         voice_layout.addWidget(self._use_default_voice_checkbox)
         
         # Trained voice combo (shown when default is off)
         trained_voice_layout = QHBoxLayout()
-        trained_voice_layout.addWidget(QLabel("Trained Voice:", container))
+        trained_voice_layout.addWidget(QLabel("Trained Voice:", voice_group))
         trained_voice_layout.addWidget(self._voice_combo)
-        trained_voice_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
-        trained_voice_widget = QWidget(container)
+        trained_voice_widget = QWidget(voice_group)
         trained_voice_widget.setLayout(trained_voice_layout)
         voice_layout.addWidget(trained_voice_widget)
         
         # Default voice combo (shown when default is on)
         default_voice_layout = QHBoxLayout()
-        default_voice_layout.addWidget(QLabel("Default Voice:", container))
+        default_voice_layout.addWidget(QLabel("Default Voice:", voice_group))
         default_voice_layout.addWidget(self._default_voice_combo)
-        default_voice_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
-        default_voice_widget = QWidget(container)
+        default_voice_widget = QWidget(voice_group)
         default_voice_widget.setLayout(default_voice_layout)
         voice_layout.addWidget(default_voice_widget)
         
-        voice_widget = QWidget(container)
+        voice_widget = QWidget(voice_group)
         voice_widget.setLayout(voice_layout)
-        form.addRow(voice_label, voice_widget)
+        voice_form.addRow("Voice:", voice_widget)
         
-        # Emotion selection with info
-        emotion_label = QLabel("Cảm xúc:", container)
-        emotion_info = QLabel("(Ảnh hưởng: tốc độ, temperature, top_p)", container)
-        emotion_info.setStyleSheet("color: gray; font-size: 10px;")
-        emotion_info.setToolTip(
-            "Lưu ý: Emotion chính được capture từ reference audio khi clone voice.\n"
-            "Lựa chọn này điều chỉnh các parameters để làm nổi bật emotion hơn:\n"
-            "- Excited (angry/happy/surprised): nhanh hơn, focused hơn\n"
-            "- Subdued (sad/afraid): chậm hơn, varied hơn\n"
-            "- Neutral: cân bằng"
-        )
-        emotion_layout = QVBoxLayout()
-        emotion_layout.setSpacing(2)
+        # Emotion selection
+        emotion_layout = QHBoxLayout()
         emotion_layout.addWidget(self._emotion_combo)
-        emotion_layout.addWidget(emotion_info)
-        emotion_widget = QWidget(container)
+        emotion_widget = QWidget(voice_group)
         emotion_widget.setLayout(emotion_layout)
-        form.addRow(emotion_label, emotion_widget)
+        voice_form.addRow("Emotion:", emotion_widget)
         
-        form.addRow("Cường độ cảm xúc", intensity_widget)
-        form.addRow("Workers", workers_widget)
-        form.addRow("Văn bản", self._text_input)
+        # Intensity
+        intensity_compact = QHBoxLayout()
+        intensity_compact.addWidget(self._intensity_slider)
+        intensity_compact.addWidget(self._intensity_label)
+        intensity_compact_widget = QWidget(voice_group)
+        intensity_compact_widget.setLayout(intensity_compact)
+        voice_form.addRow("Intensity:", intensity_compact_widget)
+        
+        main_layout.addWidget(voice_group)
+        
+        # Text input group
+        text_group = QGroupBox("Text Input", container)
+        text_layout = QVBoxLayout(text_group)
+        text_layout.setContentsMargins(12, 12, 12, 12)
+        text_layout.setSpacing(8)
+        
+        self._text_input = QTextEdit(text_group)
+        self._text_input.setPlaceholderText("Nhập nội dung cần đọc. Có thể là đoạn script dài.")
+        self._text_input.setMinimumHeight(120)
+        text_layout.addWidget(self._text_input)
+        
+        # Workers in same group
+        self._workers_spin = QSpinBox(text_group)
+        self._workers_spin.setRange(1, 8)
+        self._workers_spin.setValue(2)
+        self._workers_spin.setToolTip("Số lượng chunks xử lý đồng thời (1-8). Nhiều hơn = nhanh hơn nhưng tốn RAM hơn.")
+        
+        workers_layout = QHBoxLayout()
+        workers_layout.addWidget(QLabel("Workers:", text_group))
+        workers_layout.addWidget(self._workers_spin)
+        workers_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
+        workers_label = QLabel("(Parallel processing)", text_group)
+        workers_label.setStyleSheet("color: gray; font-size: 10px;")
+        workers_layout.addWidget(workers_label)
+        text_layout.addLayout(workers_layout)
+        
+        main_layout.addWidget(text_group)
         
         # Advanced settings section
         advanced_group = self._build_advanced_settings(container)
-        form.addRow(advanced_group)
+        main_layout.addWidget(advanced_group)
         
         return container
 
@@ -313,8 +304,15 @@ class ExecuteTab(QWidget):
         group.setChecked(False)  # Collapsed by default
         group.setToolTip("Click để mở/đóng cài đặt nâng cao")
         
-        layout = QGridLayout(group)
-        layout.setContentsMargins(12, 12, 12, 12)
+        # Main layout for group
+        main_layout = QVBoxLayout(group)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
+        
+        # Container for all advanced controls (hidden by default)
+        self._advanced_controls_container = QWidget(group)
+        layout = QGridLayout(self._advanced_controls_container)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.setColumnStretch(0, 0)  # Label column
         layout.setColumnStretch(1, 1)  # Control column
@@ -322,6 +320,9 @@ class ExecuteTab(QWidget):
         layout.setColumnStretch(3, 1)  # Control column
         layout.setColumnStretch(4, 0)  # Label column
         layout.setColumnStretch(5, 1)  # Control column
+        
+        # Initially hide the container
+        self._advanced_controls_container.setVisible(False)
         
         row = 0
         
@@ -421,6 +422,16 @@ class ExecuteTab(QWidget):
         layout.addWidget(auto_adjust_label, row, 4)
         layout.addWidget(self._auto_adjust_check, row, 5)
         
+        # Add advanced controls container to main layout
+        main_layout.addWidget(self._advanced_controls_container)
+        
+        # Connect group checkbox to show/hide advanced controls
+        def on_advanced_toggled(checked: bool):
+            self._advanced_controls_container.setVisible(checked)
+        
+        group.toggled.connect(on_advanced_toggled)
+        on_advanced_toggled(False)  # Initial state (hidden)
+        
         # Connect auto-adjust to enable/disable other controls
         def on_auto_adjust_changed(checked: bool):
             enabled = not checked
@@ -462,62 +473,72 @@ class ExecuteTab(QWidget):
 
     def _build_log_section(self) -> QWidget:
         """Build log display section."""
-        container = QWidget(self)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        log_group = QGroupBox("Process Log", self)
+        log_group.setCheckable(True)
+        log_group.setChecked(False)
+        log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(12, 12, 12, 12)
+        log_layout.setSpacing(8)
 
         # Header with clear button
         header_layout = QHBoxLayout()
-        title = QLabel("📋 Log tiến trình", container)
-        title.setStyleSheet("font-size: 16px; font-weight: 500;")
-        header_layout.addWidget(title)
         header_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
         
-        self._clear_log_button = QPushButton("Xóa log", container)
-        self._clear_log_button.setMaximumWidth(100)
+        self._clear_log_button = QPushButton("Clear", log_group)
+        self._clear_log_button.setMaximumWidth(80)
         self._clear_log_button.clicked.connect(self._clear_log)
         header_layout.addWidget(self._clear_log_button)
         
-        layout.addLayout(header_layout)
+        log_layout.addLayout(header_layout)
 
         # Log text area
-        self._log_text = QTextEdit(container)
+        self._log_text = QTextEdit(log_group)
         self._log_text.setReadOnly(True)
-        self._log_text.setMaximumHeight(200)
-        self._log_text.setPlaceholderText("Log tiến trình sẽ hiển thị ở đây...")
+        self._log_text.setMaximumHeight(150)
+        self._log_text.setPlaceholderText("Process log will appear here...")
         self._log_text.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
                 color: #d4d4d4;
                 font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 11px;
+                font-size: 10px;
                 border: 1px solid #3e3e3e;
                 border-radius: 4px;
-                padding: 8px;
+                padding: 6px;
             }
         """)
-        layout.addWidget(self._log_text)
-
-        return container
+        
+        # Container to show/hide log content
+        self._log_content_widget = QWidget(log_group)
+        log_content_layout = QVBoxLayout(self._log_content_widget)
+        log_content_layout.setContentsMargins(0, 0, 0, 0)
+        log_content_layout.addWidget(self._log_text)
+        self._log_content_widget.setVisible(False)
+        
+        log_layout.addWidget(self._log_content_widget)
+        
+        # Connect group checkbox to show/hide log
+        def on_log_toggled(checked: bool):
+            self._log_content_widget.setVisible(checked)
+        
+        log_group.toggled.connect(on_log_toggled)
+        
+        return log_group
 
     def _build_outputs_list(self) -> QWidget:
-        container = QWidget(self)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        outputs_group = QGroupBox("Output History", self)
+        outputs_layout = QVBoxLayout(outputs_group)
+        outputs_layout.setContentsMargins(12, 12, 12, 12)
+        outputs_layout.setSpacing(8)
 
-        title = QLabel("Lịch sử xuất audio", container)
-        title.setStyleSheet("font-size: 16px; font-weight: 500;")
-        layout.addWidget(title)
-
-        self._outputs_list = QListWidget(container)
+        self._outputs_list = QListWidget(outputs_group)
+        self._outputs_list.setMaximumHeight(150)
         self._outputs_list.itemActivated.connect(self._open_output_file)
         self._outputs_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self._outputs_list.customContextMenuRequested.connect(self._show_output_context_menu)
-        layout.addWidget(self._outputs_list)
+        outputs_layout.addWidget(self._outputs_list)
 
-        return container
+        return outputs_group
 
     def refresh_voices(self) -> None:
         voices = self._controller.available_voices()
@@ -552,7 +573,8 @@ class ExecuteTab(QWidget):
             default_voice_data = self._default_voice_combo.currentData()
             voice = f"default:{default_voice_data}" if default_voice_data else "default:en"
         else:
-        voice = self._voice_combo.currentText()
+            voice = self._voice_combo.currentText()
+        
         emotion_data = self._emotion_combo.currentData()
         emotion_key = emotion_data.key if emotion_data else "neutral"
         intensity = self._intensity_slider.value() / 100

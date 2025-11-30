@@ -190,12 +190,32 @@ def main():
         cmd = python_cmd + ['-m', 'tool_voices']
         
         # Run with the same environment, but use venv Python
-        result = subprocess.run(
-            cmd,
-            cwd=str(work_dir),
-            env=env
-        )
-        return result.returncode
+        # Hide console output when running as exe
+        if getattr(sys, 'frozen', False):
+            # When running as exe, hide all output and console window
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+            
+            result = subprocess.run(
+                cmd,
+                cwd=str(work_dir),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
+        else:
+            # When running as script, show output for debugging
+            result = subprocess.run(
+                cmd,
+                cwd=str(work_dir),
+                env=env
+            )
+            return result.returncode
     except Exception as e:
         import tkinter.messagebox as msgbox
         import traceback
