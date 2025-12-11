@@ -65,28 +65,11 @@ class StoryPromptGenerator:
         
         # Gemini API configuration: list of keys, random pick per chat
         self.gemini_api_keys = [
-            'AIzaSyAXhfRKTwP5zAkJbm90ajr93Q4GdmBwhRU',
-            'AIzaSyCnTTeUj7C32dpKUORYwy3FWRKb6_X6bS4',
-            'AIzaSyAH1dXX0demoy6o1CNzP6Ojf5u6yac-Ndo',
+            'AIzaSyD4pXfYEUNqWYOkAdpw7vNqsmoDdASwewk',
+            'AIzaSyCmY11OuoBc9C92PHssIp5wx_7pid-kgUg',
+            'AIzaSyDQzovP1l0_j9NEVapDz7TrMKfiVKpab1Q',
             'AIzaSyAhdS1h96roE3GnvJOfGPF50t8sLnyyXB8',
-            'AIzaSyBacZLGxE6FBnAw-pzg1y0pPnH299wxYs0',
-            'AIzaSyAHjP1qSgj5eImFfW_KcOPKpFjKhqnY4oQ',
-            'AIzaSyBmUtRXiW69DSaxwM_Ygxs-5IUSprHhgKQ',
-            'AIzaSyDizLuF-cdWT1GLlYixSmqnFMEuUc4LUL4',
-            'AIzaSyCVskdll1uS0_fA4kK0z0KQldZ7rfz-o88',
-            'AIzaSyDffoRKMqnMin3Uoh1U46aFgZtFX5dhP1M',
-            'AIzaSyBsCwWhAC4qkT3uxc-tA8DleFhMkHI-_gg',
-            'AIzaSyBb5k53lkGRJeTYPr4a11Y4HfBD15NOxFk',
-            "AIzaSyCj7QUDt8yOO2SGvAIYSHG9SuBx0VQ65Gg",
-            "AIzaSyCDxL6JPL93pCd6TtlEaMOFAsnlXKbZBms",
-            "AIzaSyBOSt-O3agTSa3L4SEZQCmWWEfPcUgfNVI",
-            "AIzaSyC0GC29JhCjPpAjCOUOSrDn-F6o7VvVuVo",
-            "AIzaSyBqY24XI_atNtedt2TirxYBsnyDSKqokns",
-            "AIzaSyBa4qjmeE09xHOWMR1rd1MtsvzZpJi0bRE",
-            "AIzaSyDDXGcyKluU_qEyV9ZieCZeThkN36jh-0g",
-            "AIzaSyBsRBtbBwW6wmal91_VEBPThqUDGc_F2M4",
-            "AIzaSyDg7cgmRziMGKfbBzRASl1F4Uc4gsmkyDw",
-            "AIzaSyDHF18e72D6MiO4a7UKouorHn_SrNAbu1k",
+            'AIzaSyAH1dXX0demoy6o1CNzP6Ojf5u6yac-Ndo'
         ]
         self.gemini_api_key = None
         self.model = None
@@ -96,24 +79,93 @@ class StoryPromptGenerator:
         
         # UI state
         self.is_generating = False
-        
+        self.api_key_mode = tk.StringVar(value="default")  # 'default' or 'custom'
+        self.custom_api_key_var = tk.StringVar(value="")
+
+        # Load cached settings (nếu có) trước khi build UI
+        self._load_settings()
+
+        # Tự động lưu lại khi người dùng thay đổi mode hoặc key
+        try:
+            self.api_key_mode.trace_add("write", lambda *args: self._save_settings())
+            self.custom_api_key_var.trace_add("write", lambda *args: self._save_settings())
+        except Exception:
+            # Nếu trace_add không khả dụng trên version Tk, vẫn an toàn bỏ qua
+            pass
+
         self._build_ui()
     
-    def _setup_gemini(self):
-        """Initialize Gemini API using a random key from the list."""
+    # ===== Settings (cache) helpers =====
+    def _get_ui_settings_path(self) -> str:
+        """Trả về đường dẫn file ui_settings.json ở thư mục gốc project."""
         try:
-            if not self.gemini_api_keys:
-                raise ValueError("No Gemini API keys configured")
-            self.gemini_api_key = random.choice(self.gemini_api_keys)
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            return os.path.join(base_dir, "ui_settings.json")
+        except Exception:
+            # Fallback: dùng current working directory
+            return os.path.join(os.getcwd(), "ui_settings.json")
+
+    def _load_settings(self):
+        """Load cache cho lựa chọn API key (mode + custom key) từ ui_settings.json nếu có."""
+        try:
+            settings_path = self._get_ui_settings_path()
+            if not os.path.exists(settings_path):
+                return
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            mode = data.get("flow_story_api_key_mode")
+            if mode in ("default", "custom"):
+                self.api_key_mode.set(mode)
+            custom_key = data.get("flow_story_custom_api_key")
+            if isinstance(custom_key, str):
+                self.custom_api_key_var.set(custom_key)
+        except Exception as e:
+            print(f"Failed to load flow story settings: {e}")
+
+    def _save_settings(self):
+        """Lưu cache lựa chọn API key (mode + custom key) vào ui_settings.json."""
+        try:
+            settings_path = self._get_ui_settings_path()
+            data = {}
+            if os.path.exists(settings_path):
+                try:
+                    with open(settings_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if not isinstance(data, dict):
+                        data = {}
+                except Exception:
+                    # Nếu file hỏng, ghi đè bằng dict mới
+                    data = {}
+
+            data["flow_story_api_key_mode"] = self.api_key_mode.get()
+            data["flow_story_custom_api_key"] = self.custom_api_key_var.get()
+
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Failed to save flow story settings: {e}")
+
+    def _setup_gemini(self, api_key: str = None):
+        """Initialize Gemini API.
+        
+        - Nếu api_key được truyền vào: dùng đúng key đó (chế độ custom).
+        - Nếu không: lấy random từ danh sách self.gemini_api_keys (chế độ default).
+        """
+        try:
+            if api_key:
+                self.gemini_api_key = api_key
+            else:
+                if not self.gemini_api_keys:
+                    raise ValueError("No Gemini API keys configured")
+                self.gemini_api_key = random.choice(self.gemini_api_keys)
+
             if _genai_sdk is not None:
                 _genai_sdk.configure(api_key=self.gemini_api_key)
-                self.model = _genai_sdk.GenerativeModel('gemini-2.5-pro
-')
+                self.model = _genai_sdk.GenerativeModel('gemini-2.5-pro')
                 self.model_backend = "sdk"
             else:
                 # Fallback to REST client if SDK is unavailable (e.g., missing cygrpc)
-                self.model = _GeminiRestClient(self.gemini_api_key, 'gemini-2.5-pro
-')
+                self.model = _GeminiRestClient(self.gemini_api_key, 'gemini-2.5-pro')
                 self.model_backend = "rest"
             self.last_setup_error = None
         except Exception as e:
@@ -202,6 +254,36 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         ], state="readonly", width=20)
         self.story_style.set("Hành động phiêu lưu")
         self.story_style.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
+
+        # API key mode (default vs custom)
+        ttk.Label(config_frame, text="Gemini API key:", 
+                 font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky=tk.W, pady=(8, 0))
+
+        api_key_mode_frame = ttk.Frame(config_frame)
+        api_key_mode_frame.grid(row=2, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
+
+        self.api_key_default_rb = ttk.Radiobutton(
+            api_key_mode_frame,
+            text="Dùng key mặc định",
+            value="default",
+            variable=self.api_key_mode,
+            command=self._on_api_key_mode_change
+        )
+        self.api_key_default_rb.grid(row=0, column=0, sticky=tk.W)
+
+        self.api_key_custom_rb = ttk.Radiobutton(
+            api_key_mode_frame,
+            text="Tự nhập key",
+            value="custom",
+            variable=self.api_key_mode,
+            command=self._on_api_key_mode_change
+        )
+        self.api_key_custom_rb.grid(row=1, column=0, sticky=tk.W, pady=(2, 0))
+
+        self.custom_api_key_entry = ttk.Entry(api_key_mode_frame, textvariable=self.custom_api_key_var, width=35)
+        self.custom_api_key_entry.grid(row=2, column=0, sticky=tk.W, pady=(4, 0))
+        # Áp trạng thái enable/disable theo mode đã load
+        self._on_api_key_mode_change()
         
         # Action buttons (left)
         button_frame = ttk.Frame(left_frame)
@@ -287,8 +369,16 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         if self.is_generating:
             return
             
-        # Randomize API key per chat
-        self._setup_gemini()
+        # Thiết lập API key theo lựa chọn: mặc định hoặc custom
+        if self.api_key_mode.get() == "custom":
+            custom_key = self.custom_api_key_var.get().strip()
+            if not custom_key:
+                messagebox.showerror("Lỗi", "Vui lòng nhập Gemini API key của bạn hoặc chọn dùng key mặc định.")
+                return
+            self._setup_gemini(api_key=custom_key)
+        else:
+            # Randomize API key per chat from default list
+            self._setup_gemini()
 
         story_text = self.story_text.get("1.0", tk.END).strip()
         if not story_text:
@@ -742,4 +832,16 @@ Hãy trả về danh sách {num_prompts} prompt, mỗi prompt trên một dòng,
             style = style_map.get(color, 'Info.TLabel')
             self.status_label.config(text=text, style=style)
         except Exception:
+            pass
+
+    def _on_api_key_mode_change(self):
+        """Bật/tắt ô nhập API key khi người dùng chọn chế độ default/custom."""
+        try:
+            mode = self.api_key_mode.get()
+            if mode == "custom":
+                self.custom_api_key_entry.configure(state="normal")
+            else:
+                self.custom_api_key_entry.configure(state="disabled")
+        except Exception:
+            # Không để lỗi nhỏ làm vỡ UI
             pass

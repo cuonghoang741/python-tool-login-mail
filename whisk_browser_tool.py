@@ -1757,6 +1757,9 @@ class WhiskBrowserTool:
                                 else:
                                     self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Slot {idx}: không tìm thấy container\n")
                         self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Tổng cộng đã upload {uploaded_image_count} ảnh\n")
+                        # Đợi 20 giây sau khi upload ảnh xong trước khi tiếp tục các step tiếp theo
+                        self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Đợi 20 giây sau khi upload ảnh...\n")
+                        time.sleep(20.0)
                     else:
                         self._append_exec_log(f"[EXEC] {time.strftime('%H:%M:%S')} | Không có hình ảnh để upload, tiếp tục với text prompt\n")
                     # Chọn size sau upload (nếu cần)

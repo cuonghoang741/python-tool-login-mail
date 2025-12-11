@@ -85,6 +85,7 @@ class VoiceSynthesisService:
         output_path: Optional[Path] = None,
         max_workers: int = 1,
         advanced_params: Optional[Dict[str, object]] = None,
+        language_override: Optional[str] = None,
     ) -> Path:
         if not text.strip():
             raise ValueError("Văn bản đầu vào không được để trống.")
@@ -92,11 +93,18 @@ class VoiceSynthesisService:
         # Check if using default voice
         if voice_name.startswith("default:"):
             return self._synthesize_with_default_voice(
-                text, voice_name, emotion, intensity, output_path, advanced_params
+                text,
+                voice_name,
+                emotion,
+                intensity,
+                output_path,
+                advanced_params,
+                language_override=language_override,
             )
 
         voice = self._load_voice(voice_name)
-        language = self._select_language(voice, text)
+        # Nếu người dùng chọn language cụ thể trong UI thì ưu tiên, ngược lại tự select
+        language = language_override or self._select_language(voice, text)
         destination = output_path or self._build_output_path(voice_name, emotion)
 
         self._log("🔧 Đang tải conditioning latents...")
@@ -450,10 +458,11 @@ class VoiceSynthesisService:
         intensity: float,
         output_path: Optional[Path] = None,
         advanced_params: Optional[Dict[str, object]] = None,
+        language_override: Optional[str] = None,
     ) -> Path:
         """Synthesize using default XTTS voice by creating default conditioning latents."""
         # Extract language code (e.g., "default:en" -> "en")
-        language = voice_name.replace("default:", "")
+        language = (language_override or voice_name.replace("default:", "")).strip()
         
         # Validate language
         supported_languages = self._get_supported_languages()

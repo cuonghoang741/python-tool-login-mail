@@ -190,9 +190,19 @@ if exist "%VENV_DIST%\Scripts\python.exe" (
 )
 echo.
 
-REM Copy tool_voices and necessary files
-echo Copying tool_voices and necessary files...
+REM Copy tool_voices, shared login module and necessary files
+echo Copying tool_voices, tool_launcher and necessary files...
 xcopy /E /I /Y "tool_voices" "dist\ToolVoiceCloning\tool_voices" >nul
+
+REM Copy shared login module so voice tool can reuse the same auth flow
+if exist "tool_launcher.py" (
+    copy /Y "tool_launcher.py" "dist\ToolVoiceCloning\tool_launcher.py" >nul
+)
+
+REM Copy auth_config.json if present (persisted login/config)
+if exist "auth_config.json" (
+    copy /Y "auth_config.json" "dist\ToolVoiceCloning\auth_config.json" >nul
+)
 if exist "config" (
     xcopy /E /I /Y "config" "dist\ToolVoiceCloning\config" >nul
 )

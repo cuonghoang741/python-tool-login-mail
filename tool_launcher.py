@@ -69,6 +69,13 @@ def _launch_flow():
     flow.main()
 
 
+def _launch_flow_images():
+    # Import and delegate after closing the launcher root
+    _prepare_tcl_env_for_current_process()
+    import flow_image_browser_tool as flow_images
+    flow_images.main()
+
+
 def _launch_gmail():
     # Import and delegate after closing the launcher root
     _prepare_tcl_env_for_current_process()
@@ -505,32 +512,38 @@ def _spawn_tool(entry: str) -> None:
         # to mirror the successful `--entry=...` CLI behavior. Otherwise,
         # prefer the packaged EXE if available.
         if os.name == 'nt':
-            in_venv = False
-            try:
-                in_venv = hasattr(sys, 'base_prefix') and sys.prefix != sys.base_prefix
-            except Exception:
-                in_venv = False
-            exe_path = os.path.join(project_root, 'dist', 'GoogleFlowTool', 'GoogleFlowTool.exe')
-            if not getattr(sys, 'frozen', False) and in_venv:
+            # Flow Images chưa có trong bản EXE cũ → luôn dùng bản script
+            if entry == 'flow_images':
                 venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
                 python_exec = venv_py_win if os.path.exists(venv_py_win) else sys.executable
                 cmd = [python_exec, script_path, f"--entry={entry}"]
-            elif os.path.exists(exe_path):
-                cmd = [exe_path, f"--entry={entry}"]
-            elif getattr(sys, 'frozen', False):
-                # Current process is already the packaged EXE
-                cmd = [sys.executable, f"--entry={entry}"]
             else:
-                # Running as script: prefer project venv interpreter if present
-                venv_py_posix = os.path.join(project_root, 'venv', 'bin', 'python')
-                venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
-                python_exec = sys.executable
+                in_venv = False
                 try:
-                    if os.path.exists(venv_py_win):
-                        python_exec = venv_py_win
+                    in_venv = hasattr(sys, 'base_prefix') and sys.prefix != sys.base_prefix
                 except Exception:
-                    pass
-                cmd = [python_exec, script_path, f"--entry={entry}"]
+                    in_venv = False
+                exe_path = os.path.join(project_root, 'dist', 'GoogleFlowTool', 'GoogleFlowTool.exe')
+                if not getattr(sys, 'frozen', False) and in_venv:
+                    venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
+                    python_exec = venv_py_win if os.path.exists(venv_py_win) else sys.executable
+                    cmd = [python_exec, script_path, f"--entry={entry}"]
+                elif os.path.exists(exe_path):
+                    cmd = [exe_path, f"--entry={entry}"]
+                elif getattr(sys, 'frozen', False):
+                    # Current process is already the packaged EXE
+                    cmd = [sys.executable, f"--entry={entry}"]
+                else:
+                    # Running as script: prefer project venv interpreter if present
+                    venv_py_posix = os.path.join(project_root, 'venv', 'bin', 'python')
+                    venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
+                    python_exec = sys.executable
+                    try:
+                        if os.path.exists(venv_py_win):
+                            python_exec = venv_py_win
+                    except Exception:
+                        pass
+                    cmd = [python_exec, script_path, f"--entry={entry}"]
         elif getattr(sys, 'frozen', False):
             # PyInstaller executable (non-Windows)
             cmd = [sys.executable, f"--entry={entry}"]
@@ -1001,6 +1014,14 @@ def main() -> None:
     )
     btn_flow.grid(row=1, column=0, padx=12, pady=12, sticky=(tk.W, tk.E))
 
+    btn_flow_images = ttk.Button(
+        container,
+        text="🖼️ Flow Images",
+        command=lambda: _spawn_and_quit(root, 'flow_images'),
+        width=28
+    )
+    btn_flow_images.grid(row=2, column=0, padx=12, pady=12, sticky=(tk.W, tk.E))
+
     def _coming_soon(name: str):
         try:
             messagebox.showinfo("Coming soon", f"{name} sẽ sớm có mặt!")
@@ -1021,7 +1042,7 @@ def main() -> None:
         command=lambda: _coming_soon("Pokecut"),
         width=28
     )
-    btn_pokecut.grid(row=2, column=0, columnspan=2, padx=12, pady=12, sticky=(tk.W, tk.E))
+    btn_pokecut.grid(row=2, column=1, padx=12, pady=12, sticky=(tk.W, tk.E))
 
     # Info
     info = ttk.Label(
@@ -1098,6 +1119,8 @@ if __name__ == "__main__":
             
             if entry == 'flow':
                 _launch_flow()
+            elif entry == 'flow_images':
+                _launch_flow_images()
             elif entry == 'gmail':
                 _launch_gmail()
             elif entry == 'whisk':

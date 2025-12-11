@@ -1,147 +1,161 @@
 @echo off
+REM IMPORTANT: Keep this file in plain ASCII to avoid encoding issues on some Windows setups.
+REM Do NOT save this file as UTF-16.
+
 chcp 65001 >nul
 title Build Tool Voice Cloning (PyInstaller)
 
 echo ========================================
-echo    BUILD Tool Voice Cloning ^(.exe^)
+echo    BUILD Tool Voice Cloning (.exe)
 echo ========================================
 echo.
 
-REM Lấy thư mục hiện tại (thư mục chứa file .bat)
+REM 1. Go to script directory
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
-REM 1. Kiểm tra Python 3.11
-echo [1/6] Kiểm tra Python 3.11...
+REM 2. Check Python 3.11
+echo [1/6] Checking Python 3.11...
 py -3.11 --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Chưa cài Python 3.11
-    echo Vui lòng cài: winget install Python.Python.3.11
+    echo [ERROR] Python 3.11 not found
+    echo Please install: winget install Python.Python.3.11
     echo.
     pause
     exit /b 1
 )
-echo [OK] Đã tìm thấy Python 3.11
+echo [OK] Python 3.11 found
 echo.
 
-REM 2. Tạo hoặc dùng lại venv_voice
-echo [2/6] Thiết lập virtual environment (venv_voice)...
+REM 3. Create or reuse venv_voice
+echo [2/6] Setting up virtual environment (venv_voice)...
 if not exist "venv_voice" (
-    echo Đang tạo virtual environment venv_voice...
+    echo Creating virtual environment venv_voice...
     py -3.11 -m venv venv_voice
     if errorlevel 1 (
-        echo [ERROR] Không thể tạo virtual environment!
+        echo [ERROR] Cannot create virtual environment!
         pause
         exit /b 1
     )
 ) else (
-    echo venv_voice đã tồn tại, dùng lại.
+    echo venv_voice already exists, reusing.
 )
 echo.
 
-REM 3. Kích hoạt venv_voice
-echo [3/6] Kích hoạt venv_voice...
-call venv_voice\Scripts\activate.bat
+REM 4. Activate venv_voice
+echo [3/6] Activating venv_voice...
+call "venv_voice\Scripts\activate.bat"
 if errorlevel 1 (
-    echo [ERROR] Không thể kích hoạt venv_voice!
+    echo [ERROR] Cannot activate venv_voice!
     pause
     exit /b 1
 )
-echo [OK] Đã kích hoạt venv_voice
+echo [OK] venv_voice activated
 echo.
 
-REM 4. Cập nhật pip và cài requirements + PyInstaller
-echo [4/6] Cài đặt / cập nhật thư viện...
+REM 5. Upgrade pip and install requirements + PyInstaller
+echo [4/6] Installing / upgrading dependencies...
 python -m ensurepip --upgrade
 python -m pip install --upgrade pip setuptools wheel
 
 if exist "requirements_voice.txt" (
-    echo Đang cài đặt các thư viện trong requirements_voice.txt...
-    python -m pip install -r requirements_voice.txt
+    echo Installing packages from requirements_voice.txt...
+    python -m pip install -r "requirements_voice.txt"
 ) else (
-    echo [WARNING] Không tìm thấy requirements_voice.txt, bỏ qua bước này.
+    echo [WARNING] requirements_voice.txt not found, skipping this step.
 )
 
-echo Cài đặt PyInstaller...
+echo Installing PyInstaller...
 python -m pip install pyinstaller
 if errorlevel 1 (
-    echo [ERROR] Không thể cài PyInstaller!
+    echo [ERROR] Cannot install PyInstaller!
     pause
     exit /b 1
 )
 echo.
 
-REM 5. Dọn dẹp build cũ
-echo [5/6] Dọn dẹp build cũ...
+REM 6. Clean old builds
+echo [5/6] Cleaning old build...
 
-REM Tắt app đang chạy (nếu có)
+REM Kill running app (if any)
 taskkill /f /im ToolVoiceCloning.exe >nul 2>&1
 taskkill /f /im python.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-REM Xóa thư mục dist/build liên quan
+REM Remove old dist/build folders
 if exist "dist\ToolVoiceCloning" (
-    echo Xoá dist\ToolVoiceCloning...
+    echo Removing dist\ToolVoiceCloning...
     rmdir /s /q "dist\ToolVoiceCloning"
 )
 
 if exist "build" (
-    echo Xoá thư mục build...
+    echo Removing build folder...
     rmdir /s /q "build"
 )
 
 echo.
 
-REM 6. Build launcher đơn giản (không cần TTS)
-echo [6/8] Build launcher .exe bằng PyInstaller (tool_voices_launcher.spec)...
-python -m PyInstaller --clean --noconfirm tool_voices_launcher.spec
+REM 7. Build launcher (no TTS inside)
+echo [6/8] Building launcher .exe with PyInstaller (tool_voices_launcher.spec)...
+python -m PyInstaller --clean --noconfirm "tool_voices_launcher.spec"
 if errorlevel 1 (
     echo.
     echo ========================================
-    echo [ERROR] Build launcher thất bại!
-    echo Kiểm tra:
-    echo 1. Đã đóng tất cả ToolVoiceCloning.exe đang chạy chưa
-    echo 2. Thử chạy lại với quyền Administrator
+    echo [ERROR] Launcher build failed!
+    echo Please check:
+    echo 1. All ToolVoiceCloning.exe are closed
+    echo 2. Try to run this script as Administrator
     echo ========================================
     echo.
     pause
     exit /b 1
 )
-echo [OK] Đã build launcher thành công
+echo [OK] Launcher built successfully
 echo.
 
-REM 7. Copy venv_voice vào dist
-echo [7/8] Đóng gói venv_voice vào thư mục dist...
+REM 8. Copy venv_voice into dist
+echo [7/8] Packing venv_voice into dist...
 if not exist "dist\ToolVoiceCloning" (
-    echo [ERROR] Thư mục dist\ToolVoiceCloning không tồn tại!
+    echo [ERROR] Folder dist\ToolVoiceCloning does not exist!
     pause
     exit /b 1
 )
 
 if not exist "venv_voice" (
-    echo [ERROR] venv_voice không tồn tại!
+    echo [ERROR] venv_voice does not exist!
     pause
     exit /b 1
 )
 
-echo Đang copy venv_voice (quá trình này có thể mất vài phút)...
+echo Copying venv_voice (this may take a few minutes)...
 xcopy /E /I /Y "venv_voice" "dist\ToolVoiceCloning\venv_voice" >nul
 if errorlevel 1 (
-    echo [WARNING] Có lỗi khi copy venv_voice, thử lại...
+    echo [WARNING] Error while copying venv_voice, retrying...
     timeout /t 2 /nobreak >nul
     xcopy /E /I /Y "venv_voice" "dist\ToolVoiceCloning\venv_voice"
     if errorlevel 1 (
-        echo [ERROR] Không thể copy venv_voice!
+        echo [ERROR] Cannot copy venv_voice!
         pause
         exit /b 1
     )
 )
-echo [OK] Đã copy venv_voice
+echo [OK] venv_voice copied
 echo.
 
-REM 8. Copy tool_voices và các file cần thiết
-echo [8/8] Copy tool_voices và các file cần thiết...
+REM 9. Copy tool_voices, shared login module, and other required files
+echo [8/8] Copying tool_voices, tool_launcher and other required files...
 xcopy /E /I /Y "tool_voices" "dist\ToolVoiceCloning\tool_voices" >nul
+
+REM Copy shared login module so external Python can import it
+if exist "tool_launcher.py" (
+    copy /Y "tool_launcher.py" "dist\ToolVoiceCloning\tool_launcher.py" >nul
+)
+
+REM Copy auth_config.json if present (so the EXE has initial config / saved login)
+if exist "auth_config.json" (
+    copy /Y "auth_config.json" "dist\ToolVoiceCloning\auth_config.json" >nul
+)
+
 if exist "config" (
     xcopy /E /I /Y "config" "dist\ToolVoiceCloning\config" >nul
 )
@@ -154,23 +168,25 @@ if exist "outputs" (
 if exist "logs" (
     if not exist "dist\ToolVoiceCloning\logs" mkdir "dist\ToolVoiceCloning\logs"
 )
-echo [OK] Đã copy các file cần thiết
+echo [OK] All files copied
 echo.
 
 echo.
 echo ========================================
-echo  BUILD THÀNH CÔNG!
+echo  BUILD SUCCESSFUL!
 echo ========================================
 echo.
-echo Cấu trúc thư mục dist\ToolVoiceCloning:
+echo dist\ToolVoiceCloning content:
 echo   - ToolVoiceCloning.exe (launcher)
-echo   - venv_voice\ (virtual environment với TTS)
+echo   - venv_voice\ (virtual environment with TTS)
 echo   - tool_voices\ (source code)
-echo   - config\ (nếu có)
-echo   - voices\ (nếu có)
+echo   - config\ (if exists)
+echo   - voices\ (if exists)
+echo   - outputs\ (if exists)
+echo   - logs\ (if exists)
 echo.
-echo Bạn có thể phân phối toàn bộ thư mục dist\ToolVoiceCloning
-echo cho người dùng khác. Họ chỉ cần double-click ToolVoiceCloning.exe
-echo để chạy ứng dụng.
+echo You can distribute the whole dist\ToolVoiceCloning folder
+echo to other users. They only need to double-click ToolVoiceCloning.exe
+echo to run the app.
 echo.
 pause

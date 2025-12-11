@@ -74,16 +74,31 @@ except Exception:
     _HAS_TTKBOOTSTRAP = False
 
 class FlowBrowserTool:
-    def __init__(self, root: tk.Tk | None, use_tk_ui: bool = True, ui_callbacks: dict | None = None):
+    def __init__(
+        self,
+        root: tk.Tk | None,
+        use_tk_ui: bool = True,
+        ui_callbacks: dict | None = None,
+        window_title: str | None = None,
+        show_story_tab: bool = True,
+        show_help_tab: bool = True,
+        enable_media_upload: bool = True,
+        force_images_mode: bool = False,
+    ):
         self.root = root
         self.use_tk_ui = use_tk_ui
+        self.window_title = window_title or "🎬 Google Flow Tool"
+        self.show_story_tab = show_story_tab
+        self.show_help_tab = show_help_tab
+        self.enable_media_upload = enable_media_upload
+        self.force_images_mode = force_images_mode
         # Optional callbacks for non-Tk UI adapters (PySide6)
         # ui_callbacks keys: on_log(str), on_status(text,color), on_exec_status(text,color), on_jobs_update()
         self.ui_callbacks = ui_callbacks or {}
         
         # Add callback for story tab to execute tab transfer
         self.ui_callbacks['import_excel_and_switch'] = self._import_excel_and_switch_tab
-        self.root.title("🎬 Google Flow Tool")
+        self.root.title(self.window_title)
         self.root.geometry("900x650")
         self.root.resizable(True, True)
         
@@ -345,14 +360,21 @@ class FlowBrowserTool:
         # Tabs
         login_tab = ttk.Frame(self.notebook)
         exec_tab = ttk.Frame(self.notebook)
-        story_tab = ttk.Frame(self.notebook)
         self.notebook.add(login_tab, text="🔐 Đăng nhập & Tài khoản")
         self.notebook.add(exec_tab, text="🎥 Execute Media")
-        self.notebook.add(story_tab, text="📚 All Story Prompts")
-        help_tab = ttk.Frame(self.notebook)
-        self.notebook.add(help_tab, text="❓ Help")
+        story_tab = None
+        if self.show_story_tab:
+            story_tab = ttk.Frame(self.notebook)
+            self.notebook.add(story_tab, text="📚 All Story Prompts")
+        help_tab = None
+        if self.show_help_tab:
+            help_tab = ttk.Frame(self.notebook)
+            self.notebook.add(help_tab, text="❓ Help")
         # Mặc định chọn tab Execute Media
-        self.notebook.select(1)
+        try:
+            self.notebook.select(exec_tab)
+        except Exception:
+            pass
 
         # ===== Login Tab =====
         frame = ttk.Frame(login_tab, padding="20")
@@ -493,23 +515,21 @@ class FlowBrowserTool:
 
         # Media upload section
         media_frame = ttk.LabelFrame(ex, text="📁 Upload Media (Frames to Video)", padding="15")
-        media_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
-        media_frame.configure(style='Card.TLabelframe')
+        if self.enable_media_upload:
+            media_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 15))
+            media_frame.configure(style='Card.TLabelframe')
 
-        ttk.Label(media_frame, text="Upload media (chỉ 1 file ảnh):", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
-        media_input_frame = ttk.Frame(media_frame)
-        media_input_frame.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        media_input_frame.columnconfigure(0, weight=1)
-        
-        self.media_paths = tk.StringVar()
-        self.media_entry = ttk.Entry(media_input_frame, textvariable=self.media_paths)
-        self.media_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
-        ttk.Button(media_input_frame, text="🖼️ Chọn ảnh", command=self._choose_image_file, style='Secondary.TButton').grid(row=0, column=1)
-        # Hide media upload in Execute task
-        try:
-            media_frame.grid_remove()
-        except Exception:
-            pass
+            ttk.Label(media_frame, text="Upload media (chỉ 1 file ảnh):", style='Subtitle.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+            media_input_frame = ttk.Frame(media_frame)
+            media_input_frame.grid(row=1, column=0, sticky=(tk.W, tk.E))
+            media_input_frame.columnconfigure(0, weight=1)
+            
+            self.media_paths = tk.StringVar()
+            self.media_entry = ttk.Entry(media_input_frame, textvariable=self.media_paths)
+            self.media_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
+            ttk.Button(media_input_frame, text="🖼️ Chọn ảnh", command=self._choose_image_file, style='Secondary.TButton').grid(row=0, column=1)
+        else:
+            self.media_paths = tk.StringVar()
 
         # Configuration section
         cfg = ttk.LabelFrame(ex, text="⚙️ Cấu hình", padding="15")
@@ -526,7 +546,7 @@ class FlowBrowserTool:
         # Settings (popover) - Aspect ratio, Outputs per prompt, Model
         ttk.Label(cfg, text="Aspect ratio", style='Subtitle.TLabel').grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
         self.aspect_ratio = ttk.Combobox(cfg, values=["16:9", "9:16"], state="readonly")
-        self.aspect_ratio.set("16:9")
+        self.aspect_ratio.set("9:16")
         self.aspect_ratio.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(8, 0))
 
         ttk.Label(cfg, text="Outputs per prompt", style='Subtitle.TLabel').grid(row=1, column=2, sticky=tk.W, pady=(8, 0))
@@ -539,6 +559,7 @@ class FlowBrowserTool:
         self.model_choice = ttk.Combobox(
             cfg,
             values=[
+                "Veo 3.1 - Fast",
                 "Veo 3 - Fast",
                 "Veo 2 - Fast",
                 "Veo 3 - Quality",
@@ -546,7 +567,7 @@ class FlowBrowserTool:
             ],
             state="readonly"
         )
-        self.model_choice.set("Veo 3 - Fast")
+        self.model_choice.set("Veo 3.1 - Fast")
         self.model_choice.grid(row=1, column=5, sticky=(tk.W, tk.E), pady=(8, 0))
         # Hide configuration section in Execute task
         try:
@@ -674,47 +695,49 @@ class FlowBrowserTool:
         self._refresh_jobs_view()
 
         # ===== Help Tab =====
-        try:
-            help_tab.columnconfigure(0, weight=1)
-            help_tab.rowconfigure(0, weight=1)
-            help_frame = ttk.Frame(help_tab, padding="20")
-            help_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-            help_frame.columnconfigure(0, weight=1)
-            ttk.Label(help_frame, text="❓ Trợ giúp", style='Title.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 16))
-            desc = (
-                "📄 Nhân bản cache: Tạo một profile dựa trên cache hiện có để chạy song song nhiều luồng cho cùng một tài khoản.\n"
-                "- Khi bấm 'Nhân bản cache', công cụ sẽ sao chép thư mục cache hiện tại (bỏ qua các file lock)\n"
-                "- Profile mới được đặt tên kèm timestamp và xuất hiện trong danh sách tài khoản\n"
-                "- Flow và Whisk dùng chung profile (whisk_*) để không cần đăng nhập lại\n\n"
-                "🔐 Đăng nhập Google: Theo dõi tiến trình đăng nhập hiển thị trên giao diện.\n"
-                "- Tool sẽ chủ động hỗ trợ tối đa khi Google yêu cầu CAPTCHA/OTP/2FA (nếu có thể tự động).\n"
-                "- Trường hợp cần thao tác thủ công (nhập mã OTP/2FA), hãy hoàn tất trong trình duyệt đang mở; tool sẽ tự phát hiện và tiếp tục."
-            )
-            lbl = ttk.Label(help_frame, text=desc, style='Info.TLabel', justify='left')
-            lbl.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        except Exception:
-            pass
+        if self.show_help_tab and help_tab is not None:
+            try:
+                help_tab.columnconfigure(0, weight=1)
+                help_tab.rowconfigure(0, weight=1)
+                help_frame = ttk.Frame(help_tab, padding="20")
+                help_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+                help_frame.columnconfigure(0, weight=1)
+                ttk.Label(help_frame, text="❓ Trợ giúp", style='Title.TLabel').grid(row=0, column=0, sticky=tk.W, pady=(0, 16))
+                desc = (
+                    "📄 Nhân bản cache: Tạo một profile dựa trên cache hiện có để chạy song song nhiều luồng cho cùng một tài khoản.\n"
+                    "- Khi bấm 'Nhân bản cache', công cụ sẽ sao chép thư mục cache hiện tại (bỏ qua các file lock)\n"
+                    "- Profile mới được đặt tên kèm timestamp và xuất hiện trong danh sách tài khoản\n"
+                    "- Flow và Whisk dùng chung profile (whisk_*) để không cần đăng nhập lại\n\n"
+                    "🔐 Đăng nhập Google: Theo dõi tiến trình đăng nhập hiển thị trên giao diện.\n"
+                    "- Tool sẽ chủ động hỗ trợ tối đa khi Google yêu cầu CAPTCHA/OTP/2FA (nếu có thể tự động).\n"
+                    "- Trường hợp cần thao tác thủ công (nhập mã OTP/2FA), hãy hoàn tất trong trình duyệt đang mở; tool sẽ tự phát hiện và tiếp tục."
+                )
+                lbl = ttk.Label(help_frame, text=desc, style='Info.TLabel', justify='left')
+                lbl.grid(row=1, column=0, sticky=(tk.W, tk.E))
+            except Exception:
+                pass
 
         # ===== Story Tab =====
-        if _HAS_STORY_TAB and StoryPromptGenerator is not None:
-            try:
-                self.story_generator = StoryPromptGenerator(story_tab, self.ui_callbacks)
-            except Exception as e:
-                self._log_error(f"Failed to initialize story tab: {e}")
-                # Create a simple error message frame
+        if self.show_story_tab and story_tab is not None:
+            if _HAS_STORY_TAB and StoryPromptGenerator is not None:
+                try:
+                    self.story_generator = StoryPromptGenerator(story_tab, self.ui_callbacks)
+                except Exception as e:
+                    self._log_error(f"Failed to initialize story tab: {e}")
+                    # Create a simple error message frame
+                    error_frame = ttk.Frame(story_tab, padding="20")
+                    error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
+                    ttk.Label(error_frame, text=f"❌ Lỗi khởi tạo Story Tab: {e}", 
+                             style='Error.TLabel').pack()
+            else:
+                # Create a simple message frame if story tab is not available
                 error_frame = ttk.Frame(story_tab, padding="20")
                 error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-                ttk.Label(error_frame, text=f"❌ Lỗi khởi tạo Story Tab: {e}", 
-                         style='Error.TLabel').pack()
-        else:
-            # Create a simple message frame if story tab is not available
-            error_frame = ttk.Frame(story_tab, padding="20")
-            error_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-            err_text = "❌ Story Tab không khả dụng"
-            if _STORY_TAB_ERROR:
-                err_text += f"\nChi tiết: {_STORY_TAB_ERROR}"
-            ttk.Label(error_frame, text=err_text, 
-                     style='Error.TLabel', justify='center', wraplength=480).pack()
+                err_text = "❌ Story Tab không khả dụng"
+                if _STORY_TAB_ERROR:
+                    err_text += f"\nChi tiết: {_STORY_TAB_ERROR}"
+                ttk.Label(error_frame, text=err_text, 
+                         style='Error.TLabel', justify='center', wraplength=480).pack()
 
     # ===================== Responsive Helpers =====================
     def _on_window_resize(self, event):
@@ -1068,27 +1091,32 @@ class FlowBrowserTool:
             self.login_btn.config(state="normal")
 
     # ===================== Execute Media =====================
-    def _import_excel_and_dispatch(self) -> None:
-        try:
-            path = filedialog.askopenfilename(title="Chọn file Excel", filetypes=[("Excel", "*.xlsx")])
-            if not path:
-                return
-            wb = load_workbook(filename=path, read_only=True, data_only=True)
-            ws = wb.active
-            rows = []
-            # Safely convert any Excel cell value to trimmed string
-            def _cell_to_str(val):
-                try:
-                    if val is None:
-                        return ''
-                    return str(val).strip()
-                except Exception:
+    def _parse_excel_rows(self, ws, is_flow_images: bool):
+        rows = []
+        # Safely convert any Excel cell value to trimmed string
+        def _cell_to_str(val):
+            try:
+                if val is None:
                     return ''
-            # Expected columns now: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model (header optional)
-            for i, row in enumerate(ws.iter_rows(values_only=True)):
-                if row is None:
+                return str(val).strip()
+            except Exception:
+                return ''
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if row is None:
+                continue
+            if is_flow_images:
+                # Columns: prompt, media, aspect_ratio, outputs_per_prompt, model
+                if i == 0 and row and isinstance(row[0], str) and 'prompt' in row[0].lower():
                     continue
-                # Skip header if first row contains strings like 'workflow'
+                prompt = _cell_to_str(row[0]) if len(row) > 0 else ''
+                media = _cell_to_str(row[1]) if len(row) > 1 else ''
+                aspect_ratio = _cell_to_str(row[2]) if len(row) > 2 else ''
+                outputs = _cell_to_str(row[3]) if len(row) > 3 else ''
+                model = _cell_to_str(row[4]) if len(row) > 4 else ''
+                if prompt.strip():
+                    rows.append({"wf": "frames_to_video", "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+            else:
+                # Columns: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model
                 if i == 0 and row and isinstance(row[0], str) and 'workflow' in row[0].lower():
                     continue
                 wf = _cell_to_str(row[0]) if len(row) > 0 else ''
@@ -1097,9 +1125,18 @@ class FlowBrowserTool:
                 aspect_ratio = _cell_to_str(row[3]) if len(row) > 3 else ''
                 outputs = _cell_to_str(row[4]) if len(row) > 4 else ''
                 model = _cell_to_str(row[5]) if len(row) > 5 else ''
-                # Skip rows with empty prompts (filter out empty records)
                 if wf and prompt.strip():
                     rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+        return rows
+
+    def _import_excel_and_dispatch(self) -> None:
+        try:
+            path = filedialog.askopenfilename(title="Chọn file Excel", filetypes=[("Excel", "*.xlsx")])
+            if not path:
+                return
+            wb = load_workbook(filename=path, read_only=True, data_only=True)
+            ws = wb.active
+            rows = self._parse_excel_rows(ws, is_flow_images=self.force_images_mode)
             if not rows:
                 messagebox.showerror("Lỗi", "Không có dữ liệu hợp lệ trong file Excel!")
                 return
@@ -1139,31 +1176,7 @@ class FlowBrowserTool:
             # Import the Excel file using existing logic
             wb = load_workbook(filename=excel_path, read_only=True, data_only=True)
             ws = wb.active
-            rows = []
-            # Safely convert any Excel cell value to trimmed string
-            def _cell_to_str(val):
-                try:
-                    if val is None:
-                        return ''
-                    return str(val).strip()
-                except Exception:
-                    return ''
-            # Expected columns now: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model (header optional)
-            for i, row in enumerate(ws.iter_rows(values_only=True)):
-                if row is None:
-                    continue
-                # Skip header if first row contains strings like 'workflow'
-                if i == 0 and row and isinstance(row[0], str) and 'workflow' in row[0].lower():
-                    continue
-                wf = _cell_to_str(row[0]) if len(row) > 0 else ''
-                prompt = _cell_to_str(row[1]) if len(row) > 1 else ''
-                media = _cell_to_str(row[2]) if len(row) > 2 else ''
-                aspect_ratio = _cell_to_str(row[3]) if len(row) > 3 else ''
-                outputs = _cell_to_str(row[4]) if len(row) > 4 else ''
-                model = _cell_to_str(row[5]) if len(row) > 5 else ''
-                # Skip rows with empty prompts (filter out empty records)
-                if wf and prompt.strip():
-                    rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+            rows = self._parse_excel_rows(ws, is_flow_images=self.force_images_mode)
             if not rows:
                 messagebox.showerror("Lỗi", "Không có dữ liệu hợp lệ trong file Excel!")
                 return
@@ -1214,7 +1227,7 @@ class FlowBrowserTool:
             path = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
                 filetypes=[("Excel", "*.xlsx")],
-                initialfile="flow_template.xlsx",
+                initialfile="flow_images_template.xlsx" if self.force_images_mode else "flow_template.xlsx",
                 title="Lưu template Excel"
             )
             if not path:
@@ -1228,11 +1241,19 @@ class FlowBrowserTool:
             op_values = list(self.outputs_per_prompt.cget('values')) if hasattr(self, 'outputs_per_prompt') else ["1", "2", "3", "4"]
             md_values = list(self.model_choice.cget('values')) if hasattr(self, 'model_choice') else ["Veo 3 - Fast", "Veo 2 - Fast", "Veo 3 - Quality", "Veo 2 - Quality"]
 
-            ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])  # header
-            # three sample rows using valid options
-            ws.append(["frames_to_video", "Running", "C:\\Users\\admin\\Downloads\\Shop-quan-ao-nu-quan-9-Fs-store.jpg", ar_values[0] if len(ar_values) > 1 else ar_values[0], op_values[0], md_values[-1]])
-            ws.append(["text_to_video", "A cinematic sunset over mountains", "", ar_values[0], op_values[-1], md_values[0]])
-            ws.append(["text_to_video", "A neon-lit cyberpunk city at night", "", ar_values[2] if len(ar_values) > 2 else ar_values[0], op_values[1] if len(op_values) > 1 else op_values[0], md_values[1] if len(md_values) > 1 else md_values[0]])
+            if self.force_images_mode:
+                ws.append(["prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])  # header
+                default_ar = "9:16"
+                default_md = "Veo 3.1 - Fast"
+                ws.append(["Running", "C:\\Users\\admin\\Downloads\\Shop-quan-ao-nu-quan-9-Fs-store.jpg", default_ar, op_values[0], default_md])
+                ws.append(["A cinematic sunset over mountains", "", default_ar, op_values[-1], default_md])
+                ws.append(["A neon-lit cyberpunk city at night", "", default_ar, op_values[1] if len(op_values) > 1 else op_values[0], default_md])
+            else:
+                ws.append(["workflow", "prompt", "media", "aspect_ratio", "outputs_per_prompt", "model"])  # header
+                # three sample rows using valid options
+                ws.append(["frames_to_video", "Running", "C:\\Users\\admin\\Downloads\\Shop-quan-ao-nu-quan-9-Fs-store.jpg", ar_values[0] if len(ar_values) > 1 else ar_values[0], op_values[0], md_values[-1]])
+                ws.append(["text_to_video", "A cinematic sunset over mountains", "", ar_values[0], op_values[-1], md_values[0]])
+                ws.append(["text_to_video", "A neon-lit cyberpunk city at night", "", ar_values[2] if len(ar_values) > 2 else ar_values[0], op_values[1] if len(op_values) > 1 else op_values[0], md_values[1] if len(md_values) > 1 else md_values[0]])
             wb.save(path)
             try:
                 self._log_exec(f"Đã lưu template Excel: {path}")
@@ -1290,12 +1311,12 @@ class FlowBrowserTool:
             return
         prompt = self.prompt_text.get("1.0", tk.END).strip()
         media = (self.media_paths.get() or "").strip()
-        wf = self.workflow.get()
+        wf = "frames_to_video" if self.force_images_mode else self.workflow.get()
         # Validate inputs
         if not prompt:
             messagebox.showerror("Lỗi", "Vui lòng nhập Prompt!")
             return
-        if wf == "frames_to_video" and not media:
+        if self.enable_media_upload and wf == "frames_to_video" and not media:
             messagebox.showerror("Lỗi", "Workflow 'Frames to Video' yêu cầu chọn 1 ảnh!")
             return
         # Build a job
@@ -1358,13 +1379,23 @@ class FlowBrowserTool:
             except Exception:
                 self._log_exec("New project button not found - continue")
 
-            # Mở combobox chọn workflow và chọn theo wf TRƯỚC
-            try:
-                self._log_exec("Opening workflow combobox and selecting option...")
-                self._select_workflow_via_combobox(drv, wf, media)
-                self._log_exec("Workflow selected.")
-            except Exception:
-                self._log_exec("Failed to select workflow via combobox", error=True)
+            # For images variant: ensure the Images radio is selected before proceeding
+            if self.force_images_mode:
+                try:
+                    self._log_exec("Switching to Images mode...")
+                    self._select_images_mode(drv)
+                    self._log_exec("Images mode selected.")
+                except Exception as ex:
+                    self._log_exec(f"Failed to select Images mode: {ex}", error=True)
+
+            # Mở combobox chọn workflow và chọn theo wf TRƯỚC (bỏ qua khi force_images_mode)
+            if not self.force_images_mode:
+                try:
+                    self._log_exec("Opening workflow combobox and selecting option...")
+                    self._select_workflow_via_combobox(drv, wf, media)
+                    self._log_exec("Workflow selected.")
+                except Exception:
+                    self._log_exec("Failed to select workflow via combobox", error=True)
 
             # Sau khi chọn workflow, mới nhập prompt
             self._log_exec("Typing prompt into textarea...")
@@ -1441,7 +1472,7 @@ class FlowBrowserTool:
             # (Removed) basic config for resolution/duration/fps per user request
 
             # Upload media: chỉ áp dụng cho frames_to_video
-            if wf == "frames_to_video" and media:
+            if wf == "frames_to_video" and media and self.enable_media_upload:
                 try:
                     self._log_exec("Waiting 3s after workflow selection before opening add panel...")
                     time.sleep(3)
@@ -1770,6 +1801,29 @@ class FlowBrowserTool:
                     self._log_exec("Selected option 1 (index 0) as fallback - no media")
         except Exception:
             self._log_exec("Failed to select any workflow option", error=True)
+
+    def _select_images_mode(self, driver: webdriver.Chrome) -> None:
+        """Click the Images radio button on new project screen before any further actions."""
+        candidates = [
+            "//button[@role='radio' and .//i[normalize-space(text())='image']]",
+            "//button[@role='radio' and contains(., 'Images')]",
+        ]
+        for xp in candidates:
+            try:
+                el = driver.find_element(By.XPATH, xp)
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                self._human_click_el(driver, el)
+                time.sleep(0.3)
+                # Verify selection
+                try:
+                    state = el.get_attribute("data-state") or el.get_attribute("aria-checked")
+                    if state and str(state).lower() in ("on", "true"):
+                        return
+                except Exception:
+                    return
+            except Exception:
+                continue
+        raise Exception("Images radio button not found")
 
     def _trigger_flow_login(self, driver: webdriver.Chrome) -> None:
         # Try clicking login button on Flow if available

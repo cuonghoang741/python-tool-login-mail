@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, List, Optional
+from functools import partial
 
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtWidgets import (
@@ -31,6 +32,7 @@ class AddVoiceController(QObject):
     training_started = Signal()
     training_finished = Signal(object)
     training_failed = Signal(str)
+    training_progress = Signal(str)
 
     def __init__(self, service: VoiceCloneService) -> None:
         super().__init__()
@@ -68,6 +70,7 @@ class AddVoiceController(QObject):
             voice_name,
             samples_list,
             language,
+            partial(self.training_progress.emit),
         )
         self._current_job = future
         future.add_done_callback(self._handle_future_completed)
@@ -95,6 +98,7 @@ class AddVoiceTab(QWidget):
         self._controller.training_started.connect(self._on_training_started)
         self._controller.training_finished.connect(self._on_training_finished)
         self._controller.training_failed.connect(self._on_training_failed)
+        self._controller.training_progress.connect(self._on_training_progress)
 
         self._build_ui()
 
@@ -335,6 +339,10 @@ class AddVoiceTab(QWidget):
         self._save_button.setEnabled(True)
         self._upload_button.setEnabled(True)
         self._show_error("Lưu giọng thất bại", message)
+
+    def _on_training_progress(self, message: str) -> None:
+        # Update status label with latest progress message
+        self._status_label.setText(message)
 
     def _show_error(self, title: str, message: str) -> None:
         """Display error message with proper formatting for multi-line text."""

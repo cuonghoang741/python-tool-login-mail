@@ -50,6 +50,7 @@ class SynthesisWorker(QThread):
         emotion: str,
         intensity: float,
         max_workers: int,
+        language: Optional[str] = None,
         advanced_params: Optional[dict] = None,
         parent=None,
     ):
@@ -60,6 +61,7 @@ class SynthesisWorker(QThread):
         self._emotion = emotion
         self._intensity = intensity
         self._max_workers = max_workers
+        self._language = language
         self._advanced_params = advanced_params or {}
         self._log_callback = None
     
@@ -83,12 +85,15 @@ class SynthesisWorker(QThread):
             self._log(f"🎤 Giọng: {self._voice}")
             self._log(f"😊 Cảm xúc: {self._emotion}, Cường độ: {self._intensity:.2f}")
             self._log(f"⚙️ Workers: {self._max_workers}")
+            if self._language:
+                self._log(f"🌐 Ngôn ngữ TTS: {self._language}")
             
             output = self._synthesis_service.synthesize(
                 text=self._text,
                 voice_name=self._voice,
                 emotion=self._emotion,
                 intensity=self._intensity,
+                language_override=self._language,
                 max_workers=self._max_workers,
             )
             
@@ -206,6 +211,39 @@ class ExecuteTab(QWidget):
         
         self._use_default_voice_checkbox.toggled.connect(self._on_default_voice_toggled)
         
+        # Language selection (TTS language)
+        self._language_combo = QComboBox(voice_group)
+        self._language_combo.setToolTip(
+            "Chọn ngôn ngữ cho TTS.\n"
+            "Auto: để hệ thống tự đoán dựa trên voice/text.\n"
+            "Khi dùng Default Voice, lựa chọn này sẽ ưu tiên language cho model XTTS."
+        )
+
+        # Populate language options (khớp với danh sách default voices)
+        self._language_combo.addItem("Auto (dựa trên voice/text)", None)
+        language_options = [
+            ("English (en)", "en"),
+            ("Spanish (es)", "es"),
+            ("French (fr)", "fr"),
+            ("German (de)", "de"),
+            ("Italian (it)", "it"),
+            ("Portuguese (pt)", "pt"),
+            ("Polish (pl)", "pl"),
+            ("Turkish (tr)", "tr"),
+            ("Russian (ru)", "ru"),
+            ("Dutch (nl)", "nl"),
+            ("Czech (cs)", "cs"),
+            ("Arabic (ar)", "ar"),
+            ("Chinese (zh-cn)", "zh-cn"),
+            ("Hungarian (hu)", "hu"),
+            ("Korean (ko)", "ko"),
+            ("Japanese (ja)", "ja"),
+            ("Hindi (hi)", "hi"),
+            ("Vietnamese (vi)", "vi"),
+        ]
+        for label, code in language_options:
+            self._language_combo.addItem(label, code)
+
         self._emotion_combo = QComboBox(voice_group)
 
         self._intensity_slider = QSlider(Qt.Horizontal, voice_group)
@@ -245,15 +283,25 @@ class ExecuteTab(QWidget):
         voice_widget = QWidget(voice_group)
         voice_widget.setLayout(voice_layout)
         voice_form.addRow("Voice:", voice_widget)
+
+        # Language + Emotion trên cùng một hàng (UI gọn hơn)
+        lang_emo_layout = QHBoxLayout()
+        lang_emo_layout.setSpacing(8)
+
+        lang_label = QLabel("Language:", voice_group)
+        emo_label = QLabel("Emotion:", voice_group)
+
+        lang_emo_layout.addWidget(lang_label)
+        lang_emo_layout.addWidget(self._language_combo, stretch=1)
+        lang_emo_layout.addSpacing(12)
+        lang_emo_layout.addWidget(emo_label)
+        lang_emo_layout.addWidget(self._emotion_combo, stretch=1)
+
+        lang_emo_widget = QWidget(voice_group)
+        lang_emo_widget.setLayout(lang_emo_layout)
+        voice_form.addRow(lang_emo_widget)
         
-        # Emotion selection
-        emotion_layout = QHBoxLayout()
-        emotion_layout.addWidget(self._emotion_combo)
-        emotion_widget = QWidget(voice_group)
-        emotion_widget.setLayout(emotion_layout)
-        voice_form.addRow("Emotion:", emotion_widget)
-        
-        # Intensity
+        # Intensity (một hàng riêng bên dưới)
         intensity_compact = QHBoxLayout()
         intensity_compact.addWidget(self._intensity_slider)
         intensity_compact.addWidget(self._intensity_label)
@@ -579,6 +627,9 @@ class ExecuteTab(QWidget):
         emotion_key = emotion_data.key if emotion_data else "neutral"
         intensity = self._intensity_slider.value() / 100
         max_workers = self._workers_spin.value()
+
+        # Language override từ dropdown (None = auto)
+        language_override = self._language_combo.currentData()
         
         # Collect advanced parameters
         advanced_params = {}
@@ -616,6 +667,7 @@ class ExecuteTab(QWidget):
             emotion_key,
             intensity,
             max_workers,
+             language_override,
             advanced_params,
             self,
         )
