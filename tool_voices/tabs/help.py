@@ -217,3 +217,11 @@ class HelpTab(QWidget):
 
 
 
+
+
+
+
+
+
+
+

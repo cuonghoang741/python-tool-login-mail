@@ -519,31 +519,31 @@ def _spawn_tool(entry: str) -> None:
                 cmd = [python_exec, script_path, f"--entry={entry}"]
             else:
                 in_venv = False
+            try:
+                in_venv = hasattr(sys, 'base_prefix') and sys.prefix != sys.base_prefix
+            except Exception:
+                in_venv = False
+            exe_path = os.path.join(project_root, 'dist', 'GoogleFlowTool', 'GoogleFlowTool.exe')
+            if not getattr(sys, 'frozen', False) and in_venv:
+                venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
+                python_exec = venv_py_win if os.path.exists(venv_py_win) else sys.executable
+                cmd = [python_exec, script_path, f"--entry={entry}"]
+            elif os.path.exists(exe_path):
+                cmd = [exe_path, f"--entry={entry}"]
+            elif getattr(sys, 'frozen', False):
+                # Current process is already the packaged EXE
+                cmd = [sys.executable, f"--entry={entry}"]
+            else:
+                # Running as script: prefer project venv interpreter if present
+                venv_py_posix = os.path.join(project_root, 'venv', 'bin', 'python')
+                venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
+                python_exec = sys.executable
                 try:
-                    in_venv = hasattr(sys, 'base_prefix') and sys.prefix != sys.base_prefix
+                    if os.path.exists(venv_py_win):
+                        python_exec = venv_py_win
                 except Exception:
-                    in_venv = False
-                exe_path = os.path.join(project_root, 'dist', 'GoogleFlowTool', 'GoogleFlowTool.exe')
-                if not getattr(sys, 'frozen', False) and in_venv:
-                    venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
-                    python_exec = venv_py_win if os.path.exists(venv_py_win) else sys.executable
-                    cmd = [python_exec, script_path, f"--entry={entry}"]
-                elif os.path.exists(exe_path):
-                    cmd = [exe_path, f"--entry={entry}"]
-                elif getattr(sys, 'frozen', False):
-                    # Current process is already the packaged EXE
-                    cmd = [sys.executable, f"--entry={entry}"]
-                else:
-                    # Running as script: prefer project venv interpreter if present
-                    venv_py_posix = os.path.join(project_root, 'venv', 'bin', 'python')
-                    venv_py_win = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
-                    python_exec = sys.executable
-                    try:
-                        if os.path.exists(venv_py_win):
-                            python_exec = venv_py_win
-                    except Exception:
-                        pass
-                    cmd = [python_exec, script_path, f"--entry={entry}"]
+                    pass
+                cmd = [python_exec, script_path, f"--entry={entry}"]
         elif getattr(sys, 'frozen', False):
             # PyInstaller executable (non-Windows)
             cmd = [sys.executable, f"--entry={entry}"]

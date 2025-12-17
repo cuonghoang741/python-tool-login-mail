@@ -142,6 +142,7 @@ class VoiceSynthesisService:
         # If only one chunk, process normally
         if len(text_chunks) == 1:
             self._log("🔄 Xử lý 1 chunk duy nhất...")
+            overall_start = time.time()
             audio = self._run_inference(
                 text=text_chunks[0],
                 language=language,
@@ -149,7 +150,8 @@ class VoiceSynthesisService:
                 speaker_embedding=speaker_embedding,
                 **inference_kwargs,
             )
-            self._log("✅ Hoàn tất xử lý chunk")
+            total_elapsed = time.time() - overall_start
+            self._log(f"✅ Hoàn tất xử lý chunk (tổng {total_elapsed:.2f}s)")
         else:
             # Process multiple chunks in parallel and concatenate
             sample_rate = self._resolve_sample_rate()
@@ -167,11 +169,13 @@ class VoiceSynthesisService:
                         inference_kwargs,
                         max_workers,
                     )
+                    self._log("⏱️ Đã hoàn tất xử lý song song.")
                 except Exception as e:
                     self._log(f"⚠️ Xử lý song song thất bại, chuyển sang tuần tự: {str(e)}", "warning")
                     self._logger.error("Parallel processing failed, falling back to sequential: %s", e)
                     # Fallback to sequential processing on error
                     audio_chunks = []
+                    start_time = time.time()
                     for i, chunk in enumerate(text_chunks):
                         self._log(f"📝 Chunk {i + 1}/{len(text_chunks)}: {len(chunk)} ký tự")
                         self._logger.info("Processing chunk %d/%d (%d chars)", i + 1, len(text_chunks), len(chunk))
@@ -183,11 +187,19 @@ class VoiceSynthesisService:
                             **inference_kwargs,
                         )
                         audio_chunks.append(chunk_audio)
-                        self._log(f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)}")
+                        elapsed = time.time() - start_time
+                        remaining = len(text_chunks) - (i + 1)
+                        avg = elapsed / (i + 1)
+                        eta = avg * remaining if remaining > 0 else 0
+                        self._log(
+                            f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)} "
+                            f"({elapsed:.2f}s, ước còn ~{eta:.2f}s)"
+                        )
             else:
                 # Sequential processing
                 self._log(f"📝 Xử lý tuần tự: {len(text_chunks)} chunks")
                 audio_chunks = []
+                start_time = time.time()
                 for i, chunk in enumerate(text_chunks):
                     self._log(f"📝 Chunk {i + 1}/{len(text_chunks)}: {len(chunk)} ký tự")
                     self._logger.info("Processing chunk %d/%d (%d chars)", i + 1, len(text_chunks), len(chunk))
@@ -199,7 +211,16 @@ class VoiceSynthesisService:
                         **inference_kwargs,
                     )
                     audio_chunks.append(chunk_audio)
-                    self._log(f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)}")
+                    elapsed = time.time() - start_time
+                    remaining = len(text_chunks) - (i + 1)
+                    avg = elapsed / (i + 1)
+                    eta = avg * remaining if remaining > 0 else 0
+                    self._log(
+                        f"✅ Hoàn tất chunk {i + 1}/{len(text_chunks)} "
+                        f"({elapsed:.2f}s, ước còn ~{eta:.2f}s)"
+                    )
+                total_elapsed = time.time() - start_time
+                self._log(f"⏱️ Tổng thời gian synth: {total_elapsed:.2f}s (tuần tự)")
             
             # Concatenate all audio chunks in order
             self._log(f"🔗 Đang ghép {len(audio_chunks)} chunks thành audio cuối cùng...")
@@ -700,7 +721,7 @@ class VoiceSynthesisService:
             tts_model = self._gateway.tts.synthesizer.tts_model
             if not hasattr(tts_model, 'tokenizer') or tts_model.tokenizer is None:
                 # Fallback: use character-based splitting
-                return self._split_text_by_chars(text, max_chars=800)
+                return self._split_text_by_chars(text, max_chars=750)
             
             tokenizer = tts_model.tokenizer
             max_tokens = getattr(tts_model.args, 'gpt_max_text_tokens', 400)
@@ -812,9 +833,9 @@ class VoiceSynthesisService:
             
         except Exception as e:
             self._logger.warning("Error splitting text by tokens, using character-based fallback: %s", e)
-            return self._split_text_by_chars(text, max_chars=800)
+            return self._split_text_by_chars(text, max_chars=500)
 
-    def _split_text_by_chars(self, text: str, max_chars: int = 800) -> List[str]:
+    def _split_text_by_chars(self, text: str, max_chars: int = 500) -> List[str]:
         """Fallback: split text by character count."""
         if len(text) <= max_chars:
             return [text]
@@ -924,13 +945,27 @@ class VoiceSynthesisService:
             # Collect results as they complete
             completed = 0
             errors = []
+            total_chunks = len(text_chunks)
             for future in as_completed(future_to_chunk):
                 try:
                     chunk_idx, chunk_audio = future.result()
                     audio_results[chunk_idx] = chunk_audio
                     completed += 1
-                    self._log(f"📊 Tiến độ: {completed}/{len(text_chunks)} chunks đã hoàn tất")
-                    self._logger.info("Completed chunk %d/%d", completed, len(text_chunks))
+                    elapsed = time.time() - start_time
+                    remaining = total_chunks - completed
+                    avg = elapsed / completed if completed else 0
+                    eta = avg * remaining if remaining > 0 else 0
+                    self._log(
+                        f"📊 Tiến độ: {completed}/{total_chunks} chunks | "
+                        f"đã chạy {elapsed:.2f}s, ước còn ~{eta:.2f}s"
+                    )
+                    self._logger.info(
+                        "Completed chunk %d/%d (elapsed %.2fs, eta %.2fs)",
+                        completed,
+                        total_chunks,
+                        elapsed,
+                        eta,
+                    )
                 except Exception as e:
                     chunk_idx = future_to_chunk[future]
                     error_msg = f"Lỗi khi xử lý chunk {chunk_idx + 1}/{len(text_chunks)}: {str(e)}"

@@ -22,3 +22,7 @@ venv
 venv_voice
 
 tool_voices/*/__pycache__/*
+
+video_length_tool/ff*/*.
+
+video_length_tool/*.exe

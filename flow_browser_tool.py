@@ -460,7 +460,9 @@ class FlowBrowserTool:
         ex.columnconfigure(2, weight=2)
         ex.rowconfigure(2, weight=1)
 
-        exec_title = ttk.Label(ex, text="🎥 Execute Media Workflow", style='Title.TLabel')
+        title_by_mode = "🎥 Flow Images" if self.force_images_mode else "🎥 Execute Media Workflow"
+
+        exec_title = ttk.Label(ex, text=title_by_mode, style='Title.TLabel')
         # Constrain title to left content area (columns 0-1) so right panel can start at row 0 col 2
         exec_title.grid(row=0, column=0, columnspan=2, pady=(0, 20))
 
@@ -1002,6 +1004,14 @@ class FlowBrowserTool:
             except Exception:
                 pass
 
+            # Try clicking "Create with Flow" button if present
+            try:
+                if self._try_click_create_with_flow(self.driver):
+                    self._set_status("Đã nhấn 'Create with Flow', đợi 5s...", "orange")
+                    time.sleep(5)
+            except Exception:
+                pass
+
             self._remember_profile(email_addr, self.current_cache_dir, self.current_user_agent)
             self.login_success = True
             self._set_status("Đăng nhập thành công Google Flow", "green")
@@ -1069,6 +1079,14 @@ class FlowBrowserTool:
             # If Flow presents a final "Sign in with Google" gate, click it
             try:
                 self._click_flow_google_signin(self.driver)
+            except Exception:
+                pass
+
+            # Try clicking "Create with Flow" button if present
+            try:
+                if self._try_click_create_with_flow(self.driver):
+                    self._set_status("Đã nhấn 'Create with Flow', đợi 5s...", "orange")
+                    time.sleep(5)
             except Exception:
                 pass
 
@@ -1316,7 +1334,7 @@ class FlowBrowserTool:
         if not prompt:
             messagebox.showerror("Lỗi", "Vui lòng nhập Prompt!")
             return
-        if self.enable_media_upload and wf == "frames_to_video" and not media:
+        if self.enable_media_upload and wf == "frames_to_video" and not media and not getattr(self, "force_images_mode", False):
             messagebox.showerror("Lỗi", "Workflow 'Frames to Video' yêu cầu chọn 1 ảnh!")
             return
         # Build a job
@@ -1351,8 +1369,6 @@ class FlowBrowserTool:
             # Track driver per account to allow concurrent runs
             self.exec_drivers[email_addr] = drv
             self.stop_exec = False
-            # Store current prompt for folder naming
-            self.current_prompt = prompt
             # Store current job index for download naming
             self.current_job_index = current_job_index
             # set current job and refresh view
@@ -1387,6 +1403,7 @@ class FlowBrowserTool:
                     self._log_exec("Images mode selected.")
                 except Exception as ex:
                     self._log_exec(f"Failed to select Images mode: {ex}", error=True)
+                    raise
 
             # Mở combobox chọn workflow và chọn theo wf TRƯỚC (bỏ qua khi force_images_mode)
             if not self.force_images_mode:
@@ -1456,7 +1473,7 @@ class FlowBrowserTool:
                     self._log_exec("Waiting 5s before monitoring processing...")
                     time.sleep(5)
                     self._log_exec("Monitoring processing and then reading API logs...")
-                    self._monitor_and_fetch_api(drv, wf="text_to_video")
+                    self._monitor_and_fetch_api(drv, wf="text_to_video", prompt=prompt)
                     return
                 except Exception as ex:
                     self._log_exec(f"Failed to click Create button for text_to_video: {ex}", error=True)
@@ -1472,25 +1489,29 @@ class FlowBrowserTool:
             # (Removed) basic config for resolution/duration/fps per user request
 
             # Upload media: chỉ áp dụng cho frames_to_video
-            if wf == "frames_to_video" and media and self.enable_media_upload:
-                try:
-                    self._log_exec("Waiting 3s after workflow selection before opening add panel...")
-                    time.sleep(3)
-                    self._log_exec("Opening frames upload panel...")
-                    self._open_frames_upload_panel(drv)
-                except Exception:
-                    self._log_exec("Could not open frames upload panel (will still try upload)")
-                self._log_exec("Uploading media (frames)...")
-                self._upload_media_any(drv, media)
-                self._log_exec("Upload step finished (best-effort).")
-                # Nhấn "Cắt và lưu" và đợi đến khi xuất hiện khung hình đầu tiên
-                try:
-                    self._log_exec("Clicking 'Cắt và lưu' and waiting for first frame...")
-                    self._confirm_crop_and_wait_first_frame(drv)
-                    self._log_exec("First frame detected.")
-                except Exception:
-                    self._log_exec("Could not confirm crop/save or detect first frame", error=True)
-                # Sau khi có khung hình đầu tiên, thử nhấn nút Tạo (Create)
+            if wf == "frames_to_video" and self.enable_media_upload:
+                if media:
+                    try:
+                        self._log_exec("Waiting 3s after workflow selection before opening add panel...")
+                        time.sleep(3)
+                        self._log_exec("Opening frames upload panel...")
+                        self._open_frames_upload_panel(drv)
+                    except Exception:
+                        self._log_exec("Could not open frames upload panel (will still try upload)")
+                    self._log_exec("Uploading media (frames)...")
+                    self._upload_media_any(drv, media)
+                    self._log_exec("Upload step finished (best-effort).")
+                    # Nhấn "Cắt và lưu" và đợi đến khi xuất hiện khung hình đầu tiên
+                    try:
+                        self._log_exec("Clicking 'Cắt và lưu' and waiting for first frame...")
+                        self._confirm_crop_and_wait_first_frame(drv)
+                        self._log_exec("First frame detected.")
+                    except Exception:
+                        self._log_exec("Could not confirm crop/save or detect first frame", error=True)
+                else:
+                    self._log_exec("Flow Images: no media provided, skip upload/crop")
+
+                # Sau upload (hoặc skip), nhấn nút Tạo
                 try:
                     self._log_exec("Clicking 'Tạo' (Create) button...")
                     self._click_create_button(drv)
@@ -1501,14 +1522,16 @@ class FlowBrowserTool:
                         messagebox.showerror("Thất bại", "Không nhấn được nút 'Tạo'. Tiến trình được đánh dấu thất bại.")
                     except Exception:
                         pass
-                    # Dừng tiến trình hiện tại
                     raise
-                # Chờ rồi theo dõi tiến trình và tải kết quả
-                self._log_exec("Waiting 100s before monitoring processing...")
-                time.sleep(100)
+
+                # Monitor ngay cho Flow Images, còn lại vẫn chờ
+                if getattr(self, "force_images_mode", False):
+                    self._log_exec("Flow Images mode: skip long wait before monitor")
+                else:
+                    self._log_exec("Waiting 100s before monitoring processing...")
+                    time.sleep(90)
                 self._log_exec("Monitoring processing and then reading API logs...")
-                self._monitor_and_fetch_api(drv, wf="frames_to_video")
-                # ĐÃ HOÀN TẤT Frames to Video: return ngay để không chạy các bước Submit/Monitor chung bên dưới
+                self._monitor_and_fetch_api(drv, wf="frames_to_video", prompt=prompt)
                 return
 
             # Execute/Run
@@ -1526,7 +1549,7 @@ class FlowBrowserTool:
             try:
                 # small delay to allow rendering to start
                 time.sleep(5)
-                self._monitor_and_fetch_api(drv, wf=wf)
+                self._monitor_and_fetch_api(drv, wf=wf, prompt=prompt)
             except Exception as ex:
                 self._log_exec(f"Monitor error: {ex}", error=True)
         except Exception as ex:
@@ -1859,6 +1882,24 @@ class FlowBrowserTool:
                 return
             except Exception:
                 continue
+
+    def _try_click_create_with_flow(self, driver: webdriver.Chrome) -> bool:
+        """Tìm và nhấn nút 'Create with Flow' nếu có. Trả về True nếu nhấn được."""
+        candidates = [
+            "//button[.//span[normalize-space()='Create with Flow']]",
+            "//button[contains(., 'Create with Flow')]",
+            "//button[@class and contains(@class, 'sc-c177465c-1') and .//span[contains(., 'Create with Flow')]]",
+        ]
+        for xp in candidates:
+            try:
+                el = driver.find_element(By.XPATH, xp)
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                self._human_click_el(driver, el)
+                time.sleep(0.3)
+                return True
+            except Exception:
+                continue
+        return False
 
     def _handle_google_login(self, driver: webdriver.Chrome, email_addr: str) -> None:
         try:
@@ -2341,10 +2382,16 @@ class FlowBrowserTool:
                 continue
 
     def _log_exec(self, message: str, success: bool = False, error: bool = False) -> None:
-        """Legacy execution log helper. Only forwards error logs now to reduce noise."""
-        if not error:
-            return
-        self._log_error(message)
+        """Execution log helper: always write to exec log, and to error log when error=True."""
+        try:
+            ts = time.strftime('%H:%M:%S')
+            level = "ERROR" if error else ("OK" if success else "INFO")
+            line = f"[{level}] {ts} | {message}\n"
+            self._append_exec_log(line)
+            if error:
+                self._log_error(message)
+        except Exception:
+            pass
 
     def _append_exec_log(self, text: str) -> None:
         """Append text to the progress log textbox and auto-scroll to bottom."""
@@ -2492,7 +2539,7 @@ class FlowBrowserTool:
             except Exception:
                 return False
         # Thời gian chờ tối đa cho upload + crop preview là 60s
-        ok = self._wait_until(first_frame_ready, timeout=60, interval=0.5)
+        ok = self._wait_until(first_frame_ready, timeout=10, interval=0.5)
         if not ok:
             raise Exception("First frame not detected after crop/save")
 
@@ -2540,7 +2587,7 @@ class FlowBrowserTool:
             except Exception as ex:
                 raise Exception(f"Failed to click Create button: {ex}")
 
-    def _monitor_and_fetch_api(self, driver: webdriver.Chrome, wf: str = None) -> None:
+    def _monitor_and_fetch_api(self, driver: webdriver.Chrome, wf: str = None, prompt: str = "") -> None:
         """Theo dõi xử lý đến khi đủ video hoàn tất theo cấu hình Outputs per prompt,
         sau đó reload trang (nếu cần) và đọc API project.searchProjectWorkflows để lấy fifeUri."""
         # Số video kỳ vọng theo cấu hình Outputs per prompt (mặc định 1)
@@ -2839,8 +2886,7 @@ class FlowBrowserTool:
             pass
         if all_urls:
             self._log_exec(f"Found {len(all_urls)} media URL(s) from API. Downloading...")
-            prompt_text = getattr(self, 'current_prompt', '')
-            self._download_files(all_urls, prompt_text)
+            self._download_files(all_urls, prompt)
             try:
                 self._log_exec("Job completed. Closing browser now and continuing queue...", success=True)
                 try:
@@ -2926,22 +2972,30 @@ class FlowBrowserTool:
             out_dir = Path(os.getcwd()) / "downloads"
             out_dir.mkdir(parents=True, exist_ok=True)
             self._log_exec("Using common downloads folder")
+            
+            # Lấy 8 ký tự đầu của prompt (sanitize)
+            prompt_prefix = ""
+            if prompt_text:
+                # Sanitize: chỉ giữ chữ cái, số, gạch dưới, bỏ khoảng trắng và ký tự đặc biệt
+                sanitized = re.sub(r'[^a-zA-Z0-9_]', '', prompt_text)
+                prompt_prefix = sanitized[:8].lower() if sanitized else ""
+            if not prompt_prefix:
+                prompt_prefix = "prompt"
+            
             for i, url in enumerate(urls, 1):
                 try:
                     ext = ".mp4"
                     if 'image' in url:
                         ext = ".png"
                     # Ensure unique filenames to avoid overwriting
-                    # Format: index_array + media_number + timestamp
+                    # Format: 8_chars_prompt + media_number + timestamp
                     ts = time.strftime('%Y%m%d_%H%M%S')
-                    # index_array là số thứ tự của job hiện tại
-                    index_array = getattr(self, 'current_job_index', 1)
                     media_number = i
-                    base_name = f"{index_array}_{media_number}_{ts}{ext}"
+                    base_name = f"{prompt_prefix}_{media_number}_{ts}{ext}"
                     dest = out_dir / base_name
                     attempt = 1
                     while dest.exists() and attempt < 1000:
-                        dest = out_dir / f"{index_array}_{media_number}_{ts}_{attempt}{ext}"
+                        dest = out_dir / f"{prompt_prefix}_{media_number}_{ts}_{attempt}{ext}"
                         attempt += 1
                     self._log_exec(f"Downloading {dest.name}...")
                     # Build request with headers to avoid 403
@@ -3067,24 +3121,49 @@ class FlowBrowserTool:
                                 
                                 return True
                             except Exception:
-                                # Fallback: contains text
+                                # Fallback: contains text nhưng verify pattern đúng
                                 try:
                                     el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
-                                    self._log_exec(f"Found partial match for: '{opt_text}'")
-                                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
-                                    self._human_click_el(driver, el)
-                                    time.sleep(0.2)
-                                    
-                                    # Verify selection
-                                    try:
-                                        selected_el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
-                                        if selected_el.get_attribute("data-state") == "checked":
-                                            self._log_exec(f"Successfully selected: '{opt_text}'")
+                                    # Verify: nếu opt_text có dấu ":" (như "16:9"), text phải chứa pattern đúng thứ tự
+                                    if ":" in opt_text:
+                                        el_text = el.text.strip()
+                                        # Kiểm tra xem text có chứa pattern đúng thứ tự không
+                                        if opt_text in el_text or opt_text.replace(":", " : ") in el_text or opt_text.replace(":", ": ") in el_text:
+                                            self._log_exec(f"Found partial match for: '{opt_text}' in '{el_text}'")
+                                            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                                            self._human_click_el(driver, el)
+                                            time.sleep(0.2)
+                                            
+                                            # Verify selection
+                                            try:
+                                                selected_el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
+                                                if selected_el.get_attribute("data-state") == "checked":
+                                                    self._log_exec(f"Successfully selected: '{opt_text}'")
+                                                    return True
+                                            except Exception:
+                                                pass
+                                            
                                             return True
-                                    except Exception:
-                                        pass
-                                    
-                                    return True
+                                        else:
+                                            self._log_exec(f"Contains match found but pattern doesn't match: '{opt_text}' not correctly in '{el_text}'")
+                                            continue
+                                    else:
+                                        # Không có dấu ":", dùng contains bình thường
+                                        self._log_exec(f"Found partial match for: '{opt_text}'")
+                                        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+                                        self._human_click_el(driver, el)
+                                        time.sleep(0.2)
+                                        
+                                        # Verify selection
+                                        try:
+                                            selected_el = target_listbox.find_element(By.XPATH, f".//*[@role='option'][contains(., '{opt_text}')]")
+                                            if selected_el.get_attribute("data-state") == "checked":
+                                                self._log_exec(f"Successfully selected: '{opt_text}'")
+                                                return True
+                                        except Exception:
+                                            pass
+                                        
+                                        return True
                                 except Exception:
                                     self._log_exec(f"No match found for: '{opt_text}'")
                                     continue
@@ -3109,13 +3188,29 @@ class FlowBrowserTool:
                     continue
             return False
 
-        # 1) Aspect ratio
+        # 1) Aspect ratio - normalize và thêm các biến thể có số 0
+        # Normalize aspect: "09:16" -> "9:16", "16:09" -> "16:9", "09:16:00" -> "9:16"
+        normalized_aspect = aspect
+        if ":" in aspect:
+            parts = aspect.split(":")
+            # Lấy 2 phần đầu (bỏ phần giây nếu có 3 phần)
+            if len(parts) >= 2:
+                try:
+                    w = str(int(parts[0]))  # Bỏ số 0 ở đầu
+                    h = str(int(parts[1]))
+                    normalized_aspect = f"{w}:{h}"
+                except ValueError:
+                    pass
+        
         aspect_map = {
-            "16:9": ["Khổ ngang (16:9)", "Landscape (16:9)"],
-            "9:16": ["Khổ dọc (9:16)", "Portrait (9:16)"],
-            "1:1": ["Vuông (1:1)", "Square (1:1)"],
+            "16:9": ["16:9", "16:09", "Khổ ngang (16:9)", "Landscape (16:9)"],
+            "9:16": ["9:16", "09:16", "Khổ dọc (9:16)", "Portrait (9:16)"],
+            "1:1": ["1:1", "01:01", "Vuông (1:1)", "Square (1:1)"],
         }
-        select_from_combobox(["Tỷ lệ khung hình", "Aspect ratio"], aspect_map.get(aspect, [aspect]))
+        # Dùng normalized_aspect để lookup, nhưng thêm cả aspect gốc vào danh sách tìm
+        search_texts = aspect_map.get(normalized_aspect, [normalized_aspect, aspect])
+        self._log_exec(f"Tìm aspect ratio: gốc='{aspect}', normalized='{normalized_aspect}', danh sách tìm={search_texts}")
+        select_from_combobox(["Tỷ lệ khung hình", "Aspect ratio"], search_texts)
         time.sleep(1)
 
         # 2) Outputs per prompt

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
+import re
 from typing import List, Optional
 
 from PySide6.QtCore import QThread, QUrl, Qt, Signal
@@ -134,6 +136,7 @@ class ExecuteTab(QWidget):
         super().__init__(parent)
         self._controller = ExecuteController(clone_service, synthesis_service)
         self._worker: Optional[SynthesisWorker] = None
+        self._synth_start_ts: Optional[float] = None
         self._build_ui()
         self.refresh_voices()
         self.refresh_emotions()
@@ -324,9 +327,9 @@ class ExecuteTab(QWidget):
         
         # Workers in same group
         self._workers_spin = QSpinBox(text_group)
-        self._workers_spin.setRange(1, 8)
-        self._workers_spin.setValue(2)
-        self._workers_spin.setToolTip("Số lượng chunks xử lý đồng thời (1-8). Nhiều hơn = nhanh hơn nhưng tốn RAM hơn.")
+        self._workers_spin.setRange(1, 4)
+        self._workers_spin.setValue(1)
+        self._workers_spin.setToolTip("Số lượng chunks xử lý đồng thời (1-4). Đề xuất: 1 để ổn định; 2 nếu chunk rất ngắn.")
         
         workers_layout = QHBoxLayout()
         workers_layout.addWidget(QLabel("Workers:", text_group))
@@ -511,6 +514,13 @@ class ExecuteTab(QWidget):
         self._status_label = QLabel("Chưa tạo audio", container)
         layout.addWidget(self._status_label)
         
+        # Timing label to show ETA and elapsed explicitly
+        self._timing_label = QLabel("ETA: -- | Elapsed: --", container)
+        timing_font = self._timing_label.font()
+        timing_font.setPointSize(9)
+        self._timing_label.setFont(timing_font)
+        layout.addWidget(self._timing_label)
+        
         # Progress bar for processing state
         self._progress_bar = QProgressBar(container)
         self._progress_bar.setRange(0, 0)  # Indeterminate progress
@@ -658,6 +668,8 @@ class ExecuteTab(QWidget):
         # Show processing state
         self._set_processing_state(True)
         self._status_label.setText("Đang xử lý... Vui lòng đợi...")
+        self._synth_start_ts = time.time()
+        self._timing_label.setText("ETA: -- | Elapsed: 0.0s")
         
         # Create and start worker thread
         self._worker = SynthesisWorker(
@@ -674,6 +686,7 @@ class ExecuteTab(QWidget):
         self._worker.finished.connect(self._on_synthesis_finished)
         self._worker.error.connect(self._on_synthesis_error)
         self._worker.progress.connect(self._append_log)
+        self._worker.progress.connect(self._update_status_from_progress)
         self._worker.start()
 
     def _set_processing_state(self, is_processing: bool) -> None:
@@ -687,12 +700,20 @@ class ExecuteTab(QWidget):
         """Handle successful synthesis completion."""
         self._set_processing_state(False)
         self._status_label.setText(f"✓ Hoàn tất: {output.name}")
+        if self._synth_start_ts:
+            total = time.time() - self._synth_start_ts
+            self._timing_label.setText(f"ETA: 0s | Elapsed: {total:.2f}s")
+            self._synth_start_ts = None
         self._append_output_item(output)
 
     def _on_synthesis_error(self, error_msg: str) -> None:
         """Handle synthesis error."""
         self._set_processing_state(False)
         self._status_label.setText("✗ Tạo audio thất bại")
+        if self._synth_start_ts:
+            total = time.time() - self._synth_start_ts
+            self._timing_label.setText(f"ETA: -- | Elapsed: {total:.2f}s")
+            self._synth_start_ts = None
         # Show detailed error message
         QMessageBox.critical(
             self, 
@@ -810,6 +831,36 @@ class ExecuteTab(QWidget):
         scrollbar = self._log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
     
+    def _update_status_from_progress(self, message: str) -> None:
+        """Mirror progress log to status label so user sees ETA without opening log."""
+        # Keep it short to avoid truncation in the action bar
+        self._status_label.setText(message)
+    
+        # Parse ETA and elapsed time from message if present
+        eta_match = re.search(r"ước còn ~([0-9]+(?:\.[0-9]+)?)s", message)
+        elapsed_match = re.search(r"đã chạy ([0-9]+(?:\.[0-9]+)?)s", message)
+        total_match = re.search(r"Tổng thời gian.*?([0-9]+(?:\.[0-9]+)?)s", message)
+
+        eta_text = None
+        elapsed_text = None
+
+        if eta_match:
+            eta_text = f"{float(eta_match.group(1)):.2f}s"
+        if total_match:
+            elapsed_text = f"{float(total_match.group(1)):.2f}s"
+        elif elapsed_match:
+            elapsed_text = f"{float(elapsed_match.group(1)):.2f}s"
+        elif self._synth_start_ts:
+            # Fallback: compute elapsed so far
+            elapsed = time.time() - self._synth_start_ts
+            elapsed_text = f"{elapsed:.2f}s"
+        
+        # Update timing label if we have info
+        if eta_text or elapsed_text:
+            eta_display = eta_text or "--"
+            elapsed_display = elapsed_text or "--"
+            self._timing_label.setText(f"ETA: {eta_display} | Elapsed: {elapsed_display}")
+
     def _clear_log(self) -> None:
         """Clear the log text area."""
         self._log_text.clear()
