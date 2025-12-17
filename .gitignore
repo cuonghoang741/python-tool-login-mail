@@ -26,3 +26,5 @@ tool_voices/*/__pycache__/*
 video_length_tool/ff*/*.
 
 video_length_tool/*.exe
+
+video_length_tool/venv_video_length/
