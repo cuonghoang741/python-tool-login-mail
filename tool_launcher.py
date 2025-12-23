@@ -109,7 +109,7 @@ def _get_app_dir() -> str:
 
 # Authentication configuration
 AUTH_CONFIG_FILE = os.path.join(_get_app_dir(), "auth_config.json")
-API_BASE_URL = "https://api-animo.airing.network/api"
+API_BASE_URL = "https://api.animostudio.vn/api"
 AUTH_ME_INTERVAL_SECONDS = 300  # 5 minutes
 
 _auth_monitor_thread = None

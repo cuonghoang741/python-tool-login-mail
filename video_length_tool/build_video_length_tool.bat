@@ -47,6 +47,15 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Install customtkinter and darkdetect (required for modern UI)
+echo Installing customtkinter...
+"%VENV_DIR%\Scripts\python.exe" -m pip install customtkinter darkdetect
+if errorlevel 1 (
+    echo Error: Failed to install customtkinter.
+    pause
+    exit /b 1
+)
+
 REM Clean previous builds (local to this folder)
 echo Cleaning previous builds...
 if exist dist (
@@ -65,6 +74,8 @@ set APP_NAME=VideoLengthTool
 echo Building executable "%APP_NAME%" from "%SCRIPT_PATH%"...
 "%VENV_DIR%\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --windowed ^
   --name "%APP_NAME%" ^
+  --collect-all customtkinter ^
+  --hidden-import darkdetect ^
   "%SCRIPT_PATH%"
 
 if errorlevel 1 (
@@ -83,6 +94,7 @@ echo.
 echo You can now run the application by double-clicking the .exe file.
 echo.
 pause
+
 
 
 
