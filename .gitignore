@@ -48,3 +48,16 @@ voices
 
 video_length_tool/ffmpeg_tmp
 video_length_tool/ffmpeg_tmp/*
+
+# Large files - ffmpeg binaries
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
+*.rar
+
+# FFmpeg directories
+video_length_tool/ffmpeg-*/
+video_length_tool/ffmpeg_tmp/
+**/ffmpeg.exe
+**/ffplay.exe
+**/ffprobe.exe
