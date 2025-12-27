@@ -45,3 +45,6 @@ video_length_tool/venv_video_length/
 voices
 
 */*.mp3
+
+video_length_tool/ffmpeg_tmp
+video_length_tool/ffmpeg_tmp/*
