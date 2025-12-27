@@ -1,0 +1,15 @@
+selenium>=4.0.0
+webdriver-manager>=3.8.0
+openpyxl>=3.1.0
+google-generativeai>=0.3.0
+requests>=2.25.0
+ttkbootstrap>=1.10.0
+
+# Voice Cloning & Synthesis dependencies
+# NOTE: TTS requires Python 3.9-3.11 (NOT 3.12+)
+# For voice tool, use: venv_voice\Scripts\python.exe -m pip install -r requirements_voice.txt
+PySide6>=6.5.0
+# TTS>=0.20.0  # Requires Python < 3.12, install separately in venv_voice
+# torch>=2.0.0  # Install separately in venv_voice
+# numpy>=1.24.0  # Install separately in venv_voice
+# soundfile>=0.12.0  # Install separately in venv_voice
