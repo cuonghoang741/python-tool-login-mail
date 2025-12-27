@@ -13,6 +13,11 @@ class AppConfig:
     voices_dir: str = "voices"
     outputs_dir: str = "outputs"
     logs_dir: str = "logs"
+    # Performance optimization settings
+    auto_detect_gpu: bool = True  # Auto-detect and use GPU if available
+    use_fp16: bool = True  # Use half precision (faster on GPU)
+    use_torch_compile: bool = False  # Use torch.compile (PyTorch 2.0+)
+    speed_preset: str = "fast"  # "quality", "balanced", "fast"
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
@@ -22,6 +27,10 @@ class AppConfig:
             voices_dir=data.get("voices_dir", cls.voices_dir),
             outputs_dir=data.get("outputs_dir", cls.outputs_dir),
             logs_dir=data.get("logs_dir", cls.logs_dir),
+            auto_detect_gpu=bool(data.get("auto_detect_gpu", cls.auto_detect_gpu)),
+            use_fp16=bool(data.get("use_fp16", cls.use_fp16)),
+            use_torch_compile=bool(data.get("use_torch_compile", cls.use_torch_compile)),
+            speed_preset=data.get("speed_preset", cls.speed_preset),
         )
 
     def to_dict(self) -> Dict[str, Any]:

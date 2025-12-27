@@ -3,5 +3,9 @@
   "use_gpu": false,
   "voices_dir": "voices",
   "outputs_dir": "outputs",
-  "logs_dir": "logs"
+  "logs_dir": "logs",
+  "auto_detect_gpu": true,
+  "use_fp16": false,
+  "use_torch_compile": false,
+  "speed_preset": "fast"
 }

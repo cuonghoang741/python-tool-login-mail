@@ -36,9 +36,14 @@ class ServiceContainer:
     @property
     def xtts_gateway(self) -> XTTSModelGateway:
         if self._xtts_gateway is None:
+            config = self.config_manager.config
             self._xtts_gateway = XTTSModelGateway(
                 model_name=self.config_manager.model_id,
-                use_gpu=self.config_manager.use_gpu,
+                use_gpu=config.use_gpu,
+                auto_detect_gpu=config.auto_detect_gpu,
+                use_fp16=config.use_fp16,
+                use_torch_compile=config.use_torch_compile,
+                speed_preset=config.speed_preset,
             )
         return self._xtts_gateway
 

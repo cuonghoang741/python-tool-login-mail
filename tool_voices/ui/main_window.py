@@ -17,6 +17,7 @@ from tool_voices.core.container import ServiceContainer
 from tool_voices.tabs.add_voice import AddVoiceTab
 from tool_voices.tabs.execute import ExecuteTab
 from tool_voices.tabs.help import HelpTab
+from tool_voices.tabs.settings_tab import SettingsTab
 
 
 def find_logo_path() -> Path | None:
@@ -72,12 +73,18 @@ class VoiceMainWindow(QMainWindow):
             self._services.voice_synthesis_service,
             self,
         )
+        settings_tab = SettingsTab(
+            self._services.config_manager,
+            self._services.xtts_gateway,
+            self,
+        )
         help_tab = HelpTab(self)
 
         add_voice_tab.voice_created.connect(lambda _: execute_tab.refresh_voices())
 
         self._tab_widget.addTab(add_voice_tab, "Upload & Train")
         self._tab_widget.addTab(execute_tab, "Synthesize")
+        self._tab_widget.addTab(settings_tab, "⚙️ Settings")
         self._tab_widget.addTab(help_tab, "Help")
 
     def _initialize_menu_bar(self) -> None:
