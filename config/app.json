@@ -5,7 +5,8 @@
   "outputs_dir": "outputs",
   "logs_dir": "logs",
   "auto_detect_gpu": true,
-  "use_fp16": false,
+  "use_fp16": true,
   "use_torch_compile": false,
-  "speed_preset": "fast"
+  "speed_preset": "balanced",
+  "use_streaming": true
 }

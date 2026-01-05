@@ -18,6 +18,7 @@ class AppConfig:
     use_fp16: bool = True  # Use half precision (faster on GPU)
     use_torch_compile: bool = False  # Use torch.compile (PyTorch 2.0+)
     speed_preset: str = "fast"  # "quality", "balanced", "fast"
+    use_streaming: bool = False  # Streaming inference (experimental, may have issues on CPU)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
@@ -31,6 +32,7 @@ class AppConfig:
             use_fp16=bool(data.get("use_fp16", cls.use_fp16)),
             use_torch_compile=bool(data.get("use_torch_compile", cls.use_torch_compile)),
             speed_preset=data.get("speed_preset", cls.speed_preset),
+            use_streaming=bool(data.get("use_streaming", cls.use_streaming)),
         )
 
     def to_dict(self) -> Dict[str, Any]:

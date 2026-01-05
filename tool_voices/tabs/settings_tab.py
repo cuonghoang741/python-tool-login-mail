@@ -104,11 +104,11 @@ class SettingsTab(QWidget):
         form.setContentsMargins(12, 12, 12, 12)
         form.setSpacing(10)
         
-        # Auto-detect GPU checkbox
-        self._auto_detect_gpu = QCheckBox("Tự động phát hiện GPU")
+        # Auto-detect GPU checkbox (Renamed to Use GPU for clarity)
+        self._auto_detect_gpu = QCheckBox("Sử dụng GPU (Ưu tiên card rời)")
         self._auto_detect_gpu.setToolTip(
-            "Tự động phát hiện và sử dụng GPU CUDA nếu có.\n"
-            "Nếu không có GPU, sẽ sử dụng CPU."
+            "Bật chế độ sử dụng GPU để tăng tốc độ tạo audio.\n"
+            "Nếu tắt, phần mềm sẽ chạy bằng CPU (chậm hơn nhưng ổn định hơn với máy cấu hình thấp)."
         )
         self._auto_detect_gpu.toggled.connect(self._on_auto_detect_changed)
         form.addRow(self._auto_detect_gpu)
@@ -145,6 +145,15 @@ class SettingsTab(QWidget):
             "Fast: gpt_cond_len=3, max_ref_length=10 (nhanh nhất)"
         )
         form.addRow("Preset:", self._speed_preset)
+        
+        # Streaming inference checkbox
+        self._use_streaming = QCheckBox("Sử dụng Streaming Inference")
+        self._use_streaming.setToolTip(
+            "Bật streaming để xem progress realtime từ model.\n"
+            "Hiển thị số audio đã tạo và tốc độ thực tế (e.g., 2.5x realtime).\n"
+            "Có thể hơi chậm hơn batch mode trên một số GPU."
+        )
+        form.addRow(self._use_streaming)
         
         # Description
         desc = QLabel(
@@ -199,6 +208,7 @@ class SettingsTab(QWidget):
             ("fp16", "FP16:"),
             ("compiled", "Compiled:"),
             ("preset", "Speed Preset:"),
+            ("warmup", "Warmup:"),
         ]:
             row = QHBoxLayout()
             name_label = QLabel(label)
@@ -226,6 +236,7 @@ class SettingsTab(QWidget):
         self._auto_detect_gpu.setChecked(config.auto_detect_gpu)
         self._use_fp16.setChecked(config.use_fp16)
         self._use_torch_compile.setChecked(config.use_torch_compile)
+        self._use_streaming.setChecked(config.use_streaming)
         
         # Set speed preset
         preset_index = self._speed_preset.findData(config.speed_preset)
@@ -295,6 +306,14 @@ class SettingsTab(QWidget):
             preset_labels = {"quality": "🎯 Quality", "balanced": "⚖️ Balanced", "fast": "🚀 Fast"}
             self._status_labels["preset"].setText(preset_labels.get(preset, preset))
             
+            # Warmup status
+            if gpu_info.get("warmed_up"):
+                self._status_labels["warmup"].setText("✅ Model warmed up")
+                self._status_labels["warmup"].setStyleSheet("color: green; font-weight: bold;")
+            else:
+                self._status_labels["warmup"].setText("⏳ Pending (first inference)")
+                self._status_labels["warmup"].setStyleSheet("color: orange; font-weight: bold;")
+            
         except Exception as e:
             for key in self._status_labels:
                 self._status_labels[key].setText("⚠️ Error")
@@ -309,6 +328,7 @@ class SettingsTab(QWidget):
         config.use_fp16 = self._use_fp16.isChecked()
         config.use_torch_compile = self._use_torch_compile.isChecked()
         config.speed_preset = self._speed_preset.currentData() or "balanced"
+        config.use_streaming = self._use_streaming.isChecked()
         
         # Save config
         self._config_manager.save()
@@ -358,6 +378,7 @@ class SettingsTab(QWidget):
             self._use_fp16.setChecked(True)
             self._use_torch_compile.setChecked(False)
             self._speed_preset.setCurrentIndex(1)  # Balanced
+            self._use_streaming.setChecked(True)  # Streaming on by default
             
             # Apply immediately
             self._apply_settings()

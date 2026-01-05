@@ -27,6 +27,8 @@ class XTTSModelGateway:
     - FP16 (half precision) for ~2x speedup on GPU
     - torch.compile for PyTorch 2.0+ optimization
     - Speed presets for quality/speed tradeoffs
+    - CUDA memory optimization with cudnn.benchmark
+    - Model warmup for reduced first-inference latency
     
     Note: XTTS-v2 captures emotion from reference audio during voice cloning,
     not through inference parameters. Emotion is embedded in the voice profile.
@@ -40,6 +42,8 @@ class XTTSModelGateway:
         use_fp16: bool = True,
         use_torch_compile: bool = False,
         speed_preset: str = "balanced",
+        enable_cudnn_benchmark: bool = True,
+        warmup_on_load: bool = True,
     ) -> None:
         self._model_name = model_name
         self._use_gpu = use_gpu
@@ -47,6 +51,8 @@ class XTTSModelGateway:
         self._use_fp16 = use_fp16
         self._use_torch_compile = use_torch_compile
         self._speed_preset = speed_preset if speed_preset in SPEED_PRESETS else "balanced"
+        self._enable_cudnn_benchmark = enable_cudnn_benchmark
+        self._warmup_on_load = warmup_on_load
         self._tts = None
         self._torch = None
         self._logger = logging.getLogger(__name__)
@@ -56,6 +62,7 @@ class XTTSModelGateway:
         self._gpu_name = ""
         self._fp16_enabled = False
         self._compiled = False
+        self._warmed_up = False
 
     @property
     def gpu_info(self) -> dict:
@@ -66,6 +73,7 @@ class XTTSModelGateway:
             "fp16_enabled": self._fp16_enabled,
             "compiled": self._compiled,
             "speed_preset": self._speed_preset,
+            "warmed_up": self._warmed_up,
         }
 
     @property
@@ -215,6 +223,10 @@ class XTTSModelGateway:
                     gpu=use_gpu,
                 )
                 
+                # Apply CUDA optimizations if GPU is enabled
+                if use_gpu:
+                    self._apply_cuda_optimizations()
+                
                 # Apply FP16 optimization if GPU is enabled
                 if use_gpu and self._use_fp16:
                     self._apply_fp16()
@@ -222,13 +234,36 @@ class XTTSModelGateway:
                 # Apply torch.compile optimization if enabled
                 if self._use_torch_compile:
                     self._apply_torch_compile()
+                
+                # Warmup model to reduce first-inference latency
+                if self._warmup_on_load:
+                    self._warmup_model()
                     
             except Exception as e:
-                raise RuntimeError(
-                    f"Không thể khởi tạo TTS model '{self._model_name}'.\n"
-                    f"Lỗi: {str(e)}\n"
-                    "Vui lòng kiểm tra kết nối internet để tải model."
-                ) from e
+                # Automatic fallback to CPU on GPU errors
+                is_gpu_error = use_gpu and (
+                    "CUDA" in str(e) or 
+                    "unknown error" in str(e).lower() or
+                    "out of memory" in str(e).lower()
+                )
+                
+                if is_gpu_error:
+                    error_msg = (
+                        f"❌ Lỗi khởi tạo GPU (CUDA Error): {str(e)}\n\n"
+                        "💡 Gợi ý khắc phục:\n"
+                        "1. Kiểm tra bộ nhớ VRAM: Tắt bớt Game, Trình duyệt hoặc ứng dụng nặng.\n"
+                        "2. Driver: Cập nhật NVIDIA Driver bản mới nhất (Studio Driver).\n"
+                        "3. FP16: Vào Settings -> Tắt 'Sử dụng FP16 (Half Precision)'.\n"
+                        "4. Nếu vẫn không được: Vào Settings -> Tắt 'Tự động phát hiện GPU' để dùng CPU."
+                    )
+                    self._logger.error(error_msg)
+                    raise RuntimeError(error_msg) from e
+                else:
+                    raise RuntimeError(
+                        f"Không thể khởi tạo TTS model '{self._model_name}'.\n"
+                        f"Lỗi: {str(e)}\n"
+                        "Vui lòng kiểm tra kết nối internet để tải model."
+                    ) from e
             finally:
                 # Restore original functions
                 torch.load = original_load
@@ -275,6 +310,105 @@ class XTTSModelGateway:
         except Exception as e:
             self._logger.warning(f"Could not apply torch.compile: {e}")
             self._compiled = False
+
+    def _apply_cuda_optimizations(self) -> None:
+        """Apply CUDA-specific optimizations for faster inference."""
+        torch = self.torch
+        
+        try:
+            if torch.cuda.is_available():
+                # Enable cudnn.benchmark for faster convolutions
+                # This is beneficial when input sizes are consistent
+                if self._enable_cudnn_benchmark:
+                    torch.backends.cudnn.benchmark = True
+                    self._logger.info("✅ cudnn.benchmark enabled - faster convolutions")
+                
+                # Enable TF32 for Ampere+ GPUs (RTX 30xx, 40xx, etc.)
+                # This provides ~3x speedup for matrix operations with minimal precision loss
+                if hasattr(torch.backends.cuda, 'matmul') and hasattr(torch.backends.cuda.matmul, 'allow_tf32'):
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
+                    self._logger.info("✅ TF32 enabled - faster matrix operations on Ampere+ GPUs")
+                
+                # Clear CUDA cache to free up memory
+                torch.cuda.empty_cache()
+                self._logger.info("✅ CUDA cache cleared")
+                
+        except Exception as e:
+            self._logger.warning(f"Could not apply CUDA optimizations: {e}")
+
+    def _warmup_model(self) -> None:
+        """Warmup model with a small inference to reduce first-run latency."""
+        if self._warmed_up:
+            return
+            
+        try:
+            self._logger.info("🔥 Warming up model...")
+            
+            # Create a minimal audio sample for warmup
+            import numpy as np
+            import tempfile
+            import wave
+            
+            sample_rate = 24000
+            duration = 0.5  # Short duration for fast warmup
+            frequency = 440.0
+            
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            audio = np.sin(2 * np.pi * frequency * t).astype(np.float32)
+            audio = np.clip(audio, -1.0, 1.0)
+            audio_int16 = (audio * 32767).astype(np.int16)
+            
+            # Save to temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+                with wave.open(tmp_path, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate)
+                    wav_file.writeframes(audio_int16.tobytes())
+            
+            # Run a minimal inference to warmup CUDA kernels
+            tts_model = self._tts.synthesizer.tts_model
+            
+            # Get conditioning latents (this also warms up that path)
+            gpt_latent, speaker_embedding = tts_model.get_conditioning_latents(
+                audio_path=tmp_path,
+                gpt_cond_len=2,  # Minimal for warmup
+                max_ref_length=5,
+            )
+            
+            # Run minimal inference
+            device = getattr(tts_model, "device", "cpu")
+            gpt_latent = gpt_latent.to(device)
+            speaker_embedding = speaker_embedding.to(device)
+            
+            # Short text for fast warmup
+            _ = tts_model.inference(
+                text="Hello",
+                language="en",
+                gpt_cond_latent=gpt_latent,
+                speaker_embedding=speaker_embedding,
+            )
+            
+            # Cleanup
+            import os
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            
+            # Clear CUDA cache after warmup
+            torch = self.torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            self._warmed_up = True
+            self._logger.info("✅ Model warmup complete - first inference will be faster")
+            
+        except Exception as e:
+            self._logger.warning(f"Model warmup failed (non-critical): {e}")
+            self._warmed_up = False
 
     def get_speed_preset_params(self) -> dict:
         """Get conditioning parameters based on speed preset."""
@@ -360,5 +494,6 @@ class XTTSModelGateway:
         self._tts = None
         self._fp16_enabled = False
         self._compiled = False
+        self._warmed_up = False  # Reset warmup flag
         
         self._logger.info("Model will reload with new settings on next use")

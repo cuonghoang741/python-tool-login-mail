@@ -1,5 +1,12 @@
 @echo off
-echo Building Tool Voice Cloning for Windows...
+REM IMPORTANT: Keep this file in plain ASCII to avoid encoding issues on some Windows setups.
+chcp 65001 >nul
+title Build Tool Voice Cloning (PyInstaller + CUDA)
+
+echo ========================================
+echo    BUILD Tool Voice Cloning (.exe)
+echo    (with GPU/CUDA Support)
+echo ========================================
 echo.
 
 REM Change to parent directory (where venv_voice, requirements_voice.txt, tool_voices_launcher.spec are located)
@@ -67,7 +74,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Install requirements
+REM Install PyTorch with CUDA support explicitly
+echo Installing PyTorch with CUDA support...
+REM First uninstall any existing torch versions to prevent conflicts (e.g. 2.8.0 cpu vs 2.6.0 cuda)
+venv_voice\Scripts\python.exe -m pip uninstall -y torch torchaudio torchvision
+
+venv_voice\Scripts\python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+if errorlevel 1 (
+    echo Error: Failed to install PyTorch CUDA
+    pause
+    exit /b 1
+)
+
+REM Install other requirements
 echo Installing requirements...
 if exist "requirements_voice.txt" (
     venv_voice\Scripts\python.exe -m pip install -r requirements_voice.txt
@@ -78,6 +97,15 @@ if exist "requirements_voice.txt" (
     )
 ) else (
     echo Warning: requirements_voice.txt not found, skipping this step.
+)
+
+REM Install auth dependencies (required for tool_launcher.py)
+echo Installing auth dependencies (requests)...
+venv_voice\Scripts\python.exe -m pip install requests
+if errorlevel 1 (
+    echo Error: Failed to install requests
+    pause
+    exit /b 1
 )
 echo.
 
@@ -161,6 +189,12 @@ if not exist "venv_voice" (
     pause
     exit /b 1
 )
+
+REM Cleanup venv to reduce size before copying
+echo Cleaning unnecessary files from venv_voice...
+for /d /r "venv_voice" %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
+if exist "venv_voice\Include" rd /s /q "venv_voice\Include"
+if exist "venv_voice\Lib\site-packages\pip" rd /s /q "venv_voice\Lib\site-packages\pip"
 
 echo Copying venv_voice (this may take several minutes)...
 xcopy /E /I /Y "venv_voice" "dist\ToolVoiceCloning\venv_voice" >nul

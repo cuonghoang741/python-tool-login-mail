@@ -12,6 +12,8 @@ from tool_voices.core.logging_config import configure_logging
 from tool_voices.ui import VoiceMainWindow
 from tool_voices.ui.styles import apply_theme
 
+# Explicitly import requests to ensure PyInstaller packages it for tool_launcher
+import requests
 
 def create_service_container() -> ServiceContainer:
     """Instantiate the service container. Separated for testability."""

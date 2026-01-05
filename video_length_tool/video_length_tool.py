@@ -108,10 +108,11 @@ ctk.set_default_color_theme("blue")
 
 class VideoLengthTool(ctk.CTk):
     """
-    Modern GUI tool to multiply video length using ffmpeg.
+    Modern GUI tool for video processing with ffmpeg.
 
-    - Mode 1: multiply length by N times
-    - Mode 2: loop until target duration, then cut at that duration
+    Features:
+    - Video Length Multiplier: multiply video length or loop to target duration
+    - Merge Clips: combine multiple videos into one with drag-drop reordering
 
     Requirements:
       - ffmpeg installed, OR ffmpeg.exe placed next to the .exe / script
@@ -134,11 +135,11 @@ class VideoLengthTool(ctk.CTk):
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("🎬 Video Length Multiplier")
-        self.geometry("850x680")
-        self.minsize(750, 600)
+        self.title("🎬 Video Tool Pro")
+        self.geometry("900x750")
+        self.minsize(800, 700)
 
-        # Variables
+        # Variables for Video Length tab
         self.input_path_var = ctk.StringVar()
         self.output_path_var = ctk.StringVar()
 
@@ -165,6 +166,17 @@ class VideoLengthTool(ctk.CTk):
         # Progress tracking
         self.progress_var = ctk.DoubleVar(value=0)
         self.is_processing = False
+
+        # Variables for Merge Clips tab
+        self.merge_video_files: list[str] = []
+        self.merge_output_path_var = ctk.StringVar()
+        self.merge_progress_var = ctk.DoubleVar(value=0)
+        self.merge_encoder_var = ctk.StringVar(value="libx264")
+        self.merge_speed_preset_var = ctk.StringVar(value="balanced")
+        self.merge_trim_var = ctk.BooleanVar(value=True)  # Trim 1s from start/end, default ON
+
+        # Drag-and-drop state
+        self._drag_start_index: int | None = None
 
         self._build_ui()
 
@@ -208,9 +220,27 @@ class VideoLengthTool(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        # Create Tabview
+        self.tabview = ctk.CTkTabview(self, corner_radius=10)
+        self.tabview.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        # Add tabs
+        self.tabview.add("📹 Video Length")
+        self.tabview.add("🎞️ Merge Clips")
+
+        # Build each tab's content
+        self._build_video_length_tab()
+        self._build_merge_clips_tab()
+
+    def _build_video_length_tab(self) -> None:
+        """Build the Video Length Multiplier tab UI."""
+        tab = self.tabview.tab("📹 Video Length")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=1)  # Make row 0 (main_frame) expandable
+
         # Main scrollable frame
-        main_frame = ctk.CTkScrollableFrame(self, corner_radius=0)
-        main_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        main_frame = ctk.CTkScrollableFrame(tab, corner_radius=0)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         main_frame.grid_columnconfigure(0, weight=1)
 
         # Title (compact)
@@ -219,7 +249,7 @@ class VideoLengthTool(ctk.CTk):
         ctk.CTkLabel(
             title_frame,
             text="🎬 Video Length Multiplier",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            font=ctk.CTkFont(size=20, weight="bold"),
         ).pack(side="left")
 
         row_idx = 1
@@ -384,6 +414,650 @@ class VideoLengthTool(ctk.CTk):
         )
         self.log_text = ctk.CTkTextbox(log_frame, height=120, corner_radius=5, font=ctk.CTkFont(family="Consolas", size=10))
         self.log_text.grid(row=1, column=0, sticky="nsew", padx=10, pady=(3, 10))
+
+    def _build_merge_clips_tab(self) -> None:
+        """Build the Merge Clips tab UI with drag-and-drop reordering."""
+        tab = self.tabview.tab("🎞️ Merge Clips")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1)  # Make video list expandable
+
+        # Main scrollable frame
+        main_frame = ctk.CTkFrame(tab, corner_radius=0, fg_color="transparent")
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_rowconfigure(2, weight=1)
+
+        # Title
+        title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        title_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ctk.CTkLabel(
+            title_frame,
+            text="🎞️ Merge Clips - Ghép nhiều video thành 1",
+            font=ctk.CTkFont(size=20, weight="bold"),
+        ).pack(side="left")
+
+        # ========== VIDEO LIST WITH CONTROLS ==========
+        video_list_frame = ctk.CTkFrame(main_frame, corner_radius=8)
+        video_list_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+        video_list_frame.grid_columnconfigure(0, weight=1)
+        video_list_frame.grid_rowconfigure(1, weight=1)
+
+        # Header with buttons
+        header_frame = ctk.CTkFrame(video_list_frame, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=8)
+        ctk.CTkLabel(
+            header_frame,
+            text="📁 Danh sách video (kéo thả để thay đổi thứ tự)",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            header_frame, text="🗑️ Xóa hết", width=80, height=28,
+            fg_color="#8b0000", hover_color="#a52a2a",
+            command=self._merge_clear_all
+        ).pack(side="right", padx=2)
+        ctk.CTkButton(
+            header_frame, text="➖ Xóa chọn", width=90, height=28,
+            fg_color="#555555", hover_color="#666666",
+            command=self._merge_remove_selected
+        ).pack(side="right", padx=2)
+        ctk.CTkButton(
+            header_frame, text="⬇️ Xuống", width=70, height=28,
+            command=self._merge_move_down
+        ).pack(side="right", padx=2)
+        ctk.CTkButton(
+            header_frame, text="⬆️ Lên", width=70, height=28,
+            command=self._merge_move_up
+        ).pack(side="right", padx=2)
+        ctk.CTkButton(
+            header_frame, text="➕ Thêm video", width=100, height=28,
+            fg_color="#1f7a1f", hover_color="#2a9a2a",
+            command=self._merge_add_videos
+        ).pack(side="right", padx=2)
+
+        # Video listbox with drag-drop support
+        listbox_container = ctk.CTkFrame(video_list_frame, corner_radius=5)
+        listbox_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        listbox_container.grid_columnconfigure(0, weight=1)
+        listbox_container.grid_rowconfigure(0, weight=1)
+
+        self.merge_listbox = tk.Listbox(
+            listbox_container,
+            height=10,
+            selectmode=tk.SINGLE,
+            bg="#2b2b2b",
+            fg="white",
+            selectbackground="#1f538d",
+            font=("Segoe UI", 10),
+            borderwidth=0,
+            highlightthickness=0,
+            activestyle='none',
+        )
+        self.merge_listbox.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+
+        # Scrollbar for listbox
+        merge_scrollbar = ctk.CTkScrollbar(listbox_container, command=self.merge_listbox.yview)
+        merge_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.merge_listbox.configure(yscrollcommand=merge_scrollbar.set)
+
+        # Bind drag-and-drop events
+        self.merge_listbox.bind('<Button-1>', self._on_drag_start)
+        self.merge_listbox.bind('<B1-Motion>', self._on_drag_motion)
+        self.merge_listbox.bind('<ButtonRelease-1>', self._on_drag_end)
+
+        # Tip label
+        ctk.CTkLabel(
+            video_list_frame,
+            text="💡 Kéo thả để sắp xếp • Video sẽ được ghép theo thứ tự từ trên xuống dưới",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        ).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 8))
+
+        # ========== OUTPUT AND OPTIONS ==========
+        options_frame = ctk.CTkFrame(main_frame, corner_radius=8)
+        options_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        options_frame.grid_columnconfigure(1, weight=1)
+
+        # Output path
+        ctk.CTkLabel(options_frame, text="📤 Output:", width=70).grid(
+            row=0, column=0, sticky="w", padx=10, pady=10
+        )
+        ctk.CTkEntry(
+            options_frame,
+            textvariable=self.merge_output_path_var,
+            placeholder_text="Chọn nơi lưu file merged...",
+            height=32
+        ).grid(row=0, column=1, sticky="ew", padx=5, pady=10)
+        ctk.CTkButton(
+            options_frame, text="Browse", width=70, height=32,
+            command=self._merge_browse_output
+        ).grid(row=0, column=2, padx=(5, 10), pady=10)
+
+        # Encoder and speed options
+        encoder_options_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        encoder_options_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
+
+        ctk.CTkLabel(encoder_options_frame, text="🔧 Encoder:").pack(side="left")
+
+        # Build encoder combo for merge tab
+        encoder_values = []
+        for key in ["libx264", "h264_nvenc", "h264_qsv", "h264_amf"]:
+            if key in self.available_encoders:
+                encoder_values.append(self.ENCODER_OPTIONS[key][1])
+
+        self.merge_encoder_combo = ctk.CTkComboBox(
+            encoder_options_frame,
+            values=encoder_values,
+            width=180, height=28,
+            command=self._on_merge_encoder_change
+        )
+        default_encoder_display = self.ENCODER_OPTIONS["libx264"][1]
+        for key in ["h264_nvenc", "h264_qsv", "h264_amf"]:
+            if key in self.available_encoders:
+                default_encoder_display = self.ENCODER_OPTIONS[key][1]
+                self.merge_encoder_var.set(key)
+                break
+        self.merge_encoder_combo.set(default_encoder_display)
+        self.merge_encoder_combo.pack(side="left", padx=10)
+
+        ctk.CTkLabel(encoder_options_frame, text="⚡ Speed:").pack(side="left", padx=(10, 0))
+
+        speed_values = [self.SPEED_PRESETS[k][2] for k in ["balanced", "fast", "ultrafast"]]
+        self.merge_speed_combo = ctk.CTkComboBox(
+            encoder_options_frame,
+            values=speed_values,
+            width=180, height=28,
+            command=self._on_merge_speed_change
+        )
+        self.merge_speed_combo.set(self.SPEED_PRESETS["balanced"][2])
+        self.merge_speed_combo.pack(side="left", padx=10)
+
+        # Trim option row
+        trim_options_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        trim_options_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
+
+        self.merge_trim_checkbox = ctk.CTkCheckBox(
+            trim_options_frame,
+            text="✂️ Cắt đầu, cuối (bỏ 1s đầu và 1s cuối mỗi video)",
+            variable=self.merge_trim_var,
+            font=ctk.CTkFont(size=12),
+        )
+        self.merge_trim_checkbox.pack(side="left")
+
+        # ========== PROGRESS AND RUN ==========
+        action_frame = ctk.CTkFrame(main_frame, corner_radius=8)
+        action_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        action_frame.grid_columnconfigure(0, weight=1)
+
+        self.merge_progress_bar = ctk.CTkProgressBar(
+            action_frame, variable=self.merge_progress_var, height=15, corner_radius=8
+        )
+        self.merge_progress_bar.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
+        self.merge_progress_bar.set(0)
+
+        self.merge_progress_label = ctk.CTkLabel(
+            action_frame, text="Sẵn sàng", font=ctk.CTkFont(size=11)
+        )
+        self.merge_progress_label.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 5))
+
+        self.merge_run_button = ctk.CTkButton(
+            action_frame,
+            text="🎬 Merge Videos",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            height=40, corner_radius=8,
+            fg_color="#1f7a1f",
+            hover_color="#2a9a2a",
+            command=self._merge_run
+        )
+        self.merge_run_button.grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
+
+        # ========== LOG ==========
+        merge_log_frame = ctk.CTkFrame(main_frame, corner_radius=8)
+        merge_log_frame.grid(row=4, column=0, sticky="nsew", pady=5)
+        merge_log_frame.grid_columnconfigure(0, weight=1)
+        merge_log_frame.grid_rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            merge_log_frame, text="📋 Log", font=ctk.CTkFont(size=13, weight="bold")
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 3))
+
+        self.merge_log_text = ctk.CTkTextbox(
+            merge_log_frame, height=100, corner_radius=5,
+            font=ctk.CTkFont(family="Consolas", size=10)
+        )
+        self.merge_log_text.grid(row=1, column=0, sticky="nsew", padx=10, pady=(3, 10))
+
+    # ========== MERGE CLIPS CALLBACKS ==========
+    def _merge_add_videos(self) -> None:
+        """Add videos to merge list."""
+        filetypes = [
+            ("Video files", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.wmv *.flv"),
+            ("All files", "*.*"),
+        ]
+        paths = filedialog.askopenfilenames(title="Chọn video để ghép", filetypes=filetypes)
+        if not paths:
+            return
+
+        # Check if this is the first batch of videos (to auto-suggest output)
+        was_empty = len(self.merge_video_files) == 0
+
+        for p in paths:
+            if p not in self.merge_video_files:
+                self.merge_video_files.append(p)
+
+        self._update_merge_listbox()
+
+        # Auto-suggest output path if this was the first addition
+        if was_empty and self.merge_video_files:
+            first_video = self.merge_video_files[0]
+            dir_path = os.path.dirname(first_video)
+            # Suggest output name based on first video
+            first_name = os.path.splitext(os.path.basename(first_video))[0]
+            suggested_output = os.path.join(dir_path, f"{first_name}_merged.mp4")
+            self.merge_output_path_var.set(suggested_output)
+
+    def _update_merge_listbox(self) -> None:
+        """Refresh the merge listbox display."""
+        self.merge_listbox.delete(0, "end")
+        for idx, path in enumerate(self.merge_video_files, start=1):
+            filename = os.path.basename(path)
+            self.merge_listbox.insert("end", f"{idx}. {filename}")
+
+    def _merge_remove_selected(self) -> None:
+        """Remove selected video from list."""
+        selection = self.merge_listbox.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        if 0 <= index < len(self.merge_video_files):
+            self.merge_video_files.pop(index)
+            self._update_merge_listbox()
+
+    def _merge_clear_all(self) -> None:
+        """Clear all videos from list."""
+        self.merge_video_files.clear()
+        self._update_merge_listbox()
+
+    def _merge_move_up(self) -> None:
+        """Move selected video up in the list."""
+        selection = self.merge_listbox.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        if index > 0:
+            # Swap with previous
+            self.merge_video_files[index], self.merge_video_files[index - 1] = \
+                self.merge_video_files[index - 1], self.merge_video_files[index]
+            self._update_merge_listbox()
+            self.merge_listbox.selection_set(index - 1)
+
+    def _merge_move_down(self) -> None:
+        """Move selected video down in the list."""
+        selection = self.merge_listbox.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        if index < len(self.merge_video_files) - 1:
+            # Swap with next
+            self.merge_video_files[index], self.merge_video_files[index + 1] = \
+                self.merge_video_files[index + 1], self.merge_video_files[index]
+            self._update_merge_listbox()
+            self.merge_listbox.selection_set(index + 1)
+
+    def _on_drag_start(self, event) -> None:
+        """Handle drag start for reordering."""
+        index = self.merge_listbox.nearest(event.y)
+        if 0 <= index < len(self.merge_video_files):
+            self._drag_start_index = index
+            self.merge_listbox.selection_clear(0, "end")
+            self.merge_listbox.selection_set(index)
+
+    def _on_drag_motion(self, event) -> None:
+        """Handle drag motion for visual feedback."""
+        if self._drag_start_index is None:
+            return
+        current_index = self.merge_listbox.nearest(event.y)
+        if current_index != self._drag_start_index and 0 <= current_index < len(self.merge_video_files):
+            # Move item
+            item = self.merge_video_files.pop(self._drag_start_index)
+            self.merge_video_files.insert(current_index, item)
+            self._drag_start_index = current_index
+            self._update_merge_listbox()
+            self.merge_listbox.selection_set(current_index)
+
+    def _on_drag_end(self, event) -> None:
+        """Handle drag end."""
+        self._drag_start_index = None
+
+    def _merge_browse_output(self) -> None:
+        """Browse for merge output file."""
+        initial_dir = os.getcwd()
+        if self.merge_video_files:
+            initial_dir = os.path.dirname(self.merge_video_files[0])
+
+        filetypes = [
+            ("MP4 video", "*.mp4"),
+            ("All files", "*.*"),
+        ]
+        path = filedialog.asksaveasfilename(
+            title="Chọn nơi lưu video ghép",
+            initialdir=initial_dir,
+            defaultextension=".mp4",
+            filetypes=filetypes,
+        )
+        if path:
+            self.merge_output_path_var.set(path)
+
+    def _on_merge_encoder_change(self, value: str) -> None:
+        """Handle merge encoder selection change."""
+        for key, (_, display, _) in self.ENCODER_OPTIONS.items():
+            if display == value:
+                self.merge_encoder_var.set(key)
+                break
+
+    def _on_merge_speed_change(self, value: str) -> None:
+        """Handle merge speed preset selection change."""
+        for key, (_, _, display) in self.SPEED_PRESETS.items():
+            if display == value:
+                self.merge_speed_preset_var.set(key)
+                break
+
+    def _merge_append_log(self, text: str) -> None:
+        """Append text to merge log."""
+        self.merge_log_text.insert("end", text + "\n")
+        self.merge_log_text.see("end")
+        self.update_idletasks()
+
+    def _merge_update_progress(self, value: float, text: str = "") -> None:
+        """Update merge progress bar and label."""
+        self.merge_progress_var.set(value)
+        if text:
+            self.merge_progress_label.configure(text=text)
+        self.update_idletasks()
+
+    def _get_merge_encoder_config(self) -> tuple[str, str, int]:
+        """Get encoder configuration for merge based on UI selections."""
+        encoder = self.merge_encoder_var.get()
+        speed_key = self.merge_speed_preset_var.get()
+
+        if speed_key not in self.SPEED_PRESETS:
+            speed_key = "balanced"
+
+        preset, crf, _ = self.SPEED_PRESETS[speed_key]
+
+        if encoder in ["h264_nvenc", "h264_qsv", "h264_amf"]:
+            if speed_key == "balanced":
+                return (encoder, "p4", 23)
+            elif speed_key == "fast":
+                return (encoder, "p2", 25)
+            else:
+                return (encoder, "p1", 28)
+        else:
+            return (encoder, preset, crf)
+
+    def _merge_run(self) -> None:
+        """Run the merge operation."""
+        if not self.merge_video_files:
+            messagebox.showerror("Error", "Vui lòng thêm video để ghép.")
+            return
+
+        if len(self.merge_video_files) < 2:
+            messagebox.showerror("Error", "Cần ít nhất 2 video để ghép.")
+            return
+
+        output_path = self.merge_output_path_var.get().strip()
+        if not output_path:
+            messagebox.showerror("Error", "Vui lòng chọn nơi lưu file output.")
+            return
+
+        # Validate all input files exist
+        for path in self.merge_video_files:
+            if not os.path.isfile(path):
+                messagebox.showerror("Error", f"File không tồn tại: {path}")
+                return
+
+        # Start processing in background thread
+        self.merge_run_button.configure(state="disabled")
+        self._merge_update_progress(0, "Đang xử lý...")
+
+        # Get trim option state
+        trim_enabled = self.merge_trim_var.get()
+
+        thread = threading.Thread(
+            target=self._merge_worker,
+            args=(self.merge_video_files.copy(), output_path, trim_enabled),
+            daemon=True,
+        )
+        thread.start()
+
+    def _merge_worker(self, video_files: list[str], output_path: str, trim_enabled: bool = False) -> None:
+        """Worker thread for merging videos."""
+        tmp_dir = None
+        trimmed_files: list[str] = []
+
+        try:
+            self._merge_append_log("🎬 Bắt đầu ghép video...")
+            self._merge_append_log(f"📁 Số lượng video: {len(video_files)}")
+            for idx, path in enumerate(video_files, start=1):
+                self._merge_append_log(f"   {idx}. {os.path.basename(path)}")
+            self._merge_append_log(f"📤 Output: {output_path}")
+
+            if trim_enabled:
+                self._merge_append_log("✂️ Chế độ cắt đầu/cuối: BẬT (cắt 1s đầu và 1s cuối mỗi video)")
+            else:
+                self._merge_append_log("✂️ Chế độ cắt đầu/cuối: TẮT")
+
+            encoder, preset, crf = self._get_merge_encoder_config()
+            self._merge_append_log(f"🔧 Encoder: {encoder} | Preset: {preset} | Quality: {crf}")
+
+            # Create temp directory
+            base_dir = os.path.dirname(output_path) or os.getcwd()
+            tmp_dir = tempfile.mkdtemp(prefix="merge_clips_", dir=base_dir)
+            concat_file = os.path.join(tmp_dir, "concat_list.txt")
+
+            try:
+                # If trim enabled, create trimmed versions of videos first
+                if trim_enabled:
+                    self._merge_update_progress(0.05, "Đang cắt video...")
+                    self._merge_append_log("✂️ Đang cắt 1s đầu và 1s cuối mỗi video...")
+
+                    files_to_merge = []
+                    for idx, video_path in enumerate(video_files):
+                        trimmed_path = os.path.join(tmp_dir, f"trimmed_{idx}.mp4")
+                        self._trim_video(video_path, trimmed_path, trim_start=1.0, trim_end=1.0)
+                        files_to_merge.append(trimmed_path)
+                        trimmed_files.append(trimmed_path)
+                        progress = 0.05 + (0.25 * (idx + 1) / len(video_files))
+                        self._merge_update_progress(progress, f"Đang cắt video {idx + 1}/{len(video_files)}...")
+
+                    self._merge_append_log(f"✅ Đã cắt xong {len(files_to_merge)} video")
+                else:
+                    files_to_merge = video_files
+
+                self._merge_update_progress(0.35, "Đang chuẩn bị ghép...")
+
+                # Check if all videos have same codec/resolution for fast concat
+                # Note: If trimmed, they should all be compatible now
+                can_fast_concat = not trim_enabled and self._check_can_fast_concat(files_to_merge)
+
+                if can_fast_concat:
+                    self._merge_append_log("✅ Video tương thích - sử dụng fast concat")
+                    self._merge_fast_concat(files_to_merge, output_path, concat_file)
+                else:
+                    if trim_enabled:
+                        self._merge_append_log("📎 Ghép các video đã cắt...")
+                    else:
+                        self._merge_append_log("⚠️ Video khác định dạng - cần re-encode")
+                    self._merge_reencode(files_to_merge, output_path, concat_file, encoder, preset, crf)
+
+                self._merge_append_log("✅ Hoàn thành!")
+                self._merge_update_progress(1.0, "✅ Hoàn thành!")
+                messagebox.showinfo("Thành công", "Video đã được ghép thành công!")
+
+            finally:
+                # Cleanup
+                try:
+                    if os.path.exists(concat_file):
+                        os.remove(concat_file)
+                    # Remove trimmed files
+                    for tf in trimmed_files:
+                        if os.path.exists(tf):
+                            os.remove(tf)
+                    if tmp_dir and os.path.isdir(tmp_dir):
+                        os.rmdir(tmp_dir)
+                except Exception:
+                    pass
+
+        except Exception as exc:
+            self._merge_append_log(f"❌ Lỗi: {exc}")
+            self._merge_update_progress(0, "❌ Lỗi")
+            messagebox.showerror("Error", f"Lỗi khi ghép video: {exc}")
+        finally:
+            self.merge_run_button.configure(state="normal")
+
+    def _trim_video(self, input_path: str, output_path: str, trim_start: float = 1.0, trim_end: float = 1.0) -> None:
+        """
+        Trim video by removing trim_start seconds from beginning and trim_end seconds from end.
+        """
+        # Get video duration first
+        duration = self._get_media_duration(input_path)
+
+        if duration <= (trim_start + trim_end):
+            # Video too short, just copy it
+            self._merge_append_log(f"⚠️ Video quá ngắn để cắt: {os.path.basename(input_path)}")
+            cmd = [
+                self.ffmpeg_executable,
+                "-y",
+                "-i", input_path,
+                "-c", "copy",
+                output_path
+            ]
+        else:
+            # Calculate new duration
+            new_duration = duration - trim_start - trim_end
+
+            # Use re-encode for precise trimming
+            encoder, preset, crf = self._get_merge_encoder_config()
+
+            cmd = [
+                self.ffmpeg_executable,
+                "-y",
+                "-ss", str(trim_start),  # Start after trim_start seconds
+                "-i", input_path,
+                "-t", str(new_duration),  # Duration (not end time)
+                "-threads", "0",
+            ]
+
+            # Add encoder args
+            if encoder == "libx264":
+                cmd.extend(["-c:v", "libx264", "-preset", preset, "-crf", str(crf)])
+            elif encoder == "h264_nvenc":
+                cmd.extend(["-c:v", "h264_nvenc", "-preset", preset, "-cq", str(crf), "-rc", "vbr"])
+            elif encoder == "h264_qsv":
+                cmd.extend(["-c:v", "h264_qsv", "-preset", preset, "-global_quality", str(crf)])
+            elif encoder == "h264_amf":
+                quality = "speed" if preset in ["p1", "p2"] else "balanced"
+                cmd.extend(["-c:v", "h264_amf", "-quality", quality, "-rc", "vbr_latency",
+                           "-qp_i", str(crf), "-qp_p", str(crf)])
+
+            cmd.extend(["-c:a", "aac", "-b:a", "192k", output_path])
+
+        subprocess.run(cmd, check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+
+    def _check_can_fast_concat(self, video_files: list[str]) -> bool:
+        """Check if videos can be concatenated without re-encoding."""
+        try:
+            ffprobe = get_ffprobe_executable()
+            first_info = None
+
+            for path in video_files:
+                cmd = [
+                    ffprobe, "-v", "error",
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name,width,height",
+                    "-of", "csv=p=0",
+                    path
+                ]
+                result = subprocess.run(
+                    cmd, capture_output=True, timeout=30,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                info = result.stdout.decode().strip()
+
+                if first_info is None:
+                    first_info = info
+                elif info != first_info:
+                    return False
+
+            return True
+        except Exception:
+            return False
+
+    def _merge_fast_concat(self, video_files: list[str], output_path: str, concat_file: str) -> None:
+        """Fast concatenation using stream copy."""
+        self._merge_update_progress(0.3, "Đang ghép (fast mode)...")
+
+        # Create concat file
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for path in video_files:
+                escaped = os.path.abspath(path).replace("\\", "/").replace("'", "'\\''")
+                f.write(f"file '{escaped}'\n")
+
+        cmd = [
+            self.ffmpeg_executable,
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concat_file,
+            "-c", "copy",
+            output_path
+        ]
+
+        self._merge_append_log("🔄 Running: " + " ".join(cmd))
+        subprocess.run(cmd, check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+
+    def _merge_reencode(self, video_files: list[str], output_path: str, concat_file: str,
+                        encoder: str, preset: str, crf: int) -> None:
+        """Concatenation with re-encoding for incompatible videos."""
+        self._merge_update_progress(0.2, "Đang ghép (re-encode)...")
+
+        # Create concat file
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for path in video_files:
+                escaped = os.path.abspath(path).replace("\\", "/").replace("'", "'\\''")
+                f.write(f"file '{escaped}'\n")
+
+        # Build encoding args
+        encode_args = ["-threads", "0"]
+
+        if encoder == "libx264":
+            encode_args.extend(["-c:v", "libx264", "-preset", preset, "-crf", str(crf)])
+        elif encoder == "h264_nvenc":
+            encode_args.extend(["-c:v", "h264_nvenc", "-preset", preset, "-cq", str(crf), "-rc", "vbr"])
+        elif encoder == "h264_qsv":
+            encode_args.extend(["-c:v", "h264_qsv", "-preset", preset, "-global_quality", str(crf)])
+        elif encoder == "h264_amf":
+            quality = "speed" if preset in ["p1", "p2"] else "balanced"
+            encode_args.extend(["-c:v", "h264_amf", "-quality", quality, "-rc", "vbr_latency",
+                               "-qp_i", str(crf), "-qp_p", str(crf)])
+
+        encode_args.extend(["-c:a", "aac", "-b:a", "192k"])
+
+        cmd = [
+            self.ffmpeg_executable,
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concat_file,
+            *encode_args,
+            output_path
+        ]
+
+        self._merge_append_log("🔄 Running: " + " ".join(cmd))
+        subprocess.run(cmd, check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
 
     # UI CALLBACKS
     def _on_speed_change(self, value: str) -> None:
@@ -749,7 +1423,8 @@ class VideoLengthTool(ctk.CTk):
             ]
             self.append_log("🔄 Running ffmpeg (copy only)...")
             self.append_log(" ".join(cmd))
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             return
 
         loop_count = factor - 1
@@ -769,7 +1444,8 @@ class VideoLengthTool(ctk.CTk):
         self.append_log("🔄 Running ffmpeg (copy mode)...")
         self.append_log(" ".join(cmd_copy))
         try:
-            subprocess.run(cmd_copy, check=True)
+            subprocess.run(cmd_copy, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             return
         except subprocess.CalledProcessError:
             self.append_log("⚠️ Copy mode failed, retrying with re-encode...")
@@ -788,7 +1464,8 @@ class VideoLengthTool(ctk.CTk):
         ]
         self.append_log("🔄 Running ffmpeg (re-encode mode)...")
         self.append_log(" ".join(cmd_reencode))
-        subprocess.run(cmd_reencode, check=True)
+        subprocess.run(cmd_reencode, check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
 
     def _run_ffmpeg_target(self, input_path: str, output_path: str, target_seconds: int) -> None:
         # Loop infinitely and cut at target duration
@@ -808,7 +1485,8 @@ class VideoLengthTool(ctk.CTk):
         self.append_log("🔄 Running ffmpeg (copy mode, target duration)...")
         self.append_log(" ".join(cmd_copy))
         try:
-            subprocess.run(cmd_copy, check=True)
+            subprocess.run(cmd_copy, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             return
         except subprocess.CalledProcessError:
             self.append_log("⚠️ Copy mode failed, retrying with re-encode...")
@@ -828,7 +1506,8 @@ class VideoLengthTool(ctk.CTk):
         ]
         self.append_log("🔄 Running ffmpeg (re-encode mode, target duration)...")
         self.append_log(" ".join(cmd_reencode))
-        subprocess.run(cmd_reencode, check=True)
+        subprocess.run(cmd_reencode, check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
 
     # Helpers for durations and advanced pipeline
     def _get_media_duration(self, path: str) -> float:
@@ -848,7 +1527,8 @@ class VideoLengthTool(ctk.CTk):
         ]
         self.append_log("🔍 Running ffprobe: " + " ".join(cmd))
         try:
-            out = subprocess.check_output(cmd, stderr=subprocess.PIPE, timeout=30)
+            out = subprocess.check_output(cmd, stderr=subprocess.PIPE, timeout=30,
+                                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             duration_str = out.decode("utf-8", errors="replace").strip()
             if not duration_str or duration_str.lower() in ("nan", "inf", "-inf"):
                 raise ValueError(f"Invalid duration from ffprobe: {duration_str}")
@@ -949,7 +1629,8 @@ class VideoLengthTool(ctk.CTk):
 
             self.append_log("🔧 Muxing final output...")
             self.append_log(" ".join(cmd_mux))
-            subprocess.run(cmd_mux, check=True)
+            subprocess.run(cmd_mux, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
         finally:
             # Clean up temp files
             try:
@@ -1014,7 +1695,8 @@ class VideoLengthTool(ctk.CTk):
             self.append_log("🔄 Building video track (copy mode, video only)...")
             self.append_log(" ".join(cmd_copy))
             try:
-                subprocess.run(cmd_copy, check=True)
+                subprocess.run(cmd_copy, check=True,
+                              creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
                 return
             except subprocess.CalledProcessError:
                 self.append_log("⚠️ Copy mode for video track failed, retrying with re-encode...")
@@ -1037,7 +1719,8 @@ class VideoLengthTool(ctk.CTk):
         ]
         self.append_log("🔄 Building video track (re-encode mode)...")
         self.append_log(" ".join(cmd_reencode))
-        subprocess.run(cmd_reencode, check=True)
+        subprocess.run(cmd_reencode, check=True,
+                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
 
     def _build_audio_track(
         self,
@@ -1104,7 +1787,8 @@ class VideoLengthTool(ctk.CTk):
         self.append_log("🎵 Building audio track from playlist...")
         self.append_log(" ".join(cmd))
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True,
+                          creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
         finally:
             try:
                 if os.path.exists(playlist_path):

@@ -1,5 +1,6 @@
 @echo off
-echo Building VideoLengthTool for Windows...
+echo Building VideoToolPro for Windows...
+echo (Includes: Video Length Multiplier + Merge Clips)
 echo.
 
 REM Check if Python 3.11 is available
@@ -69,7 +70,7 @@ if exist build (
 
 REM Build executable (onefile, windowed)
 set SCRIPT_PATH=video_length_tool.py
-set APP_NAME=VideoLengthTool
+set APP_NAME=VideoToolPro
 
 echo Building executable "%APP_NAME%" from "%SCRIPT_PATH%"...
 "%VENV_DIR%\Scripts\python.exe" -m PyInstaller --noconfirm --onefile --windowed ^

@@ -54,6 +54,7 @@ class SynthesisWorker(QThread):
         max_workers: int,
         language: Optional[str] = None,
         advanced_params: Optional[dict] = None,
+        use_streaming: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -65,6 +66,7 @@ class SynthesisWorker(QThread):
         self._max_workers = max_workers
         self._language = language
         self._advanced_params = advanced_params or {}
+        self._use_streaming = use_streaming
         self._log_callback = None
     
     def set_log_callback(self, callback):
@@ -87,6 +89,7 @@ class SynthesisWorker(QThread):
             self._log(f"🎤 Giọng: {self._voice}")
             self._log(f"😊 Cảm xúc: {self._emotion}, Cường độ: {self._intensity:.2f}")
             self._log(f"⚙️ Workers: {self._max_workers}")
+            self._log(f"🎵 Streaming: {'Bật' if self._use_streaming else 'Tắt'}")
             if self._language:
                 self._log(f"🌐 Ngôn ngữ TTS: {self._language}")
             
@@ -97,6 +100,7 @@ class SynthesisWorker(QThread):
                 intensity=self._intensity,
                 language_override=self._language,
                 max_workers=self._max_workers,
+                use_streaming=self._use_streaming,
             )
             
             self._log(f"✅ Hoàn tất! File: {output.name}")
@@ -671,17 +675,27 @@ class ExecuteTab(QWidget):
         self._synth_start_ts = time.time()
         self._timing_label.setText("ETA: -- | Elapsed: 0.0s")
         
+        # Read use_streaming from config (default True)
+        try:
+            from tool_voices.core.config import ConfigManager
+            from pathlib import Path
+            config_manager = ConfigManager(Path.cwd())
+            use_streaming = config_manager.config.use_streaming
+        except Exception:
+            use_streaming = True  # Default if config not available
+        
         # Create and start worker thread
         self._worker = SynthesisWorker(
-            self._controller._synthesis_service,
-            text,
-            voice,
-            emotion_key,
-            intensity,
-            max_workers,
-             language_override,
-            advanced_params,
-            self,
+            synthesis_service=self._controller._synthesis_service,
+            text=text,
+            voice=voice,
+            emotion=emotion_key,
+            intensity=intensity,
+            max_workers=max_workers,
+            language=language_override,
+            advanced_params=advanced_params,
+            use_streaming=use_streaming,
+            parent=self,
         )
         self._worker.finished.connect(self._on_synthesis_finished)
         self._worker.error.connect(self._on_synthesis_error)
