@@ -60,6 +60,26 @@ if errorlevel 1 (
 )
 
 echo.
+REM Check for VC++ Redistributable (needed for Python/CUDA)
+echo Checking for Visual C++ Redistributable...
+if not exist "C:\Windows\System32\msvcp140.dll" (
+    echo.
+    echo [MISSING] Visual C++ Redistributable is missing.
+    echo Installing Microsoft Visual C++ 2015-2022 Redistributable...
+    echo.
+    winget install Microsoft.VCRedist.2015+.x64 --silent --accept-package-agreements --accept-source-agreements --force
+    if errorlevel 1 (
+        echo [ERROR] Failed to install VC++ Redistributable.
+        echo Please ensure you have internet connection.
+        echo Manual download link: https://aka.ms/vs/17/release/vc_redist.x64.exe
+    ) else (
+        echo [SUCCESS] Visual C++ Redistributable installed.
+    )
+) else (
+    echo [OK] Visual C++ Redistributable found.
+)
+
+echo.
 echo ========================================
 echo Setup completed successfully!
 echo ========================================

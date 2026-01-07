@@ -7,6 +7,6 @@
   "auto_detect_gpu": true,
   "use_fp16": true,
   "use_torch_compile": false,
-  "speed_preset": "balanced",
+  "speed_preset": "quality",
   "use_streaming": true
 }

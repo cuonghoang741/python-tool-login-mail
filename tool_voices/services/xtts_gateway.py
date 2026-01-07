@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import sys
+import functools
 from typing import Iterable, Optional, Tuple
 
 # Speed preset configurations for XTTS-v2
@@ -39,11 +40,11 @@ class XTTSModelGateway:
         model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2",
         use_gpu: bool = False,
         auto_detect_gpu: bool = True,
-        use_fp16: bool = True,
+        use_fp16: bool = False,  # Disabled - causes instability
         use_torch_compile: bool = False,
         speed_preset: str = "balanced",
-        enable_cudnn_benchmark: bool = True,
-        warmup_on_load: bool = True,
+        enable_cudnn_benchmark: bool = False,  # Disabled - can cause memory spikes
+        warmup_on_load: bool = False,  # Disabled - causes lag/memory issues on some machines
     ) -> None:
         self._model_name = model_name
         self._use_gpu = use_gpu
@@ -271,17 +272,21 @@ class XTTSModelGateway:
         return self._tts
 
     def _apply_fp16(self) -> None:
-        """Apply FP16 (half precision) to model for faster inference on GPU."""
-        try:
-            if self._tts and hasattr(self._tts, 'synthesizer'):
-                tts_model = self._tts.synthesizer.tts_model
-                if tts_model is not None:
-                    tts_model.half()
-                    self._fp16_enabled = True
-                    self._logger.info("✅ FP16 (half precision) enabled - ~2x speedup")
-        except Exception as e:
-            self._logger.warning(f"Could not enable FP16: {e}")
-            self._fp16_enabled = False
+        """
+        FP16 optimization is DISABLED.
+        
+        Previous implementations caused severe issues:
+        - .half() -> "Input type mismatch" errors
+        - torch.autocast() -> "CUDA device-side assert" + memory overflow
+        
+        For stability, we run in full FP32 mode. The speed difference is 
+        acceptable for most users, and reliability is more important.
+        """
+        # Do nothing - FP16 is disabled for stability
+        self._fp16_enabled = False
+        self._logger.info(
+            "ℹ️ FP16 is disabled for stability. Running in FP32 mode."
+        )
 
     def _apply_torch_compile(self) -> None:
         """Apply torch.compile optimization for PyTorch 2.0+."""

@@ -11,9 +11,9 @@
       "password": "$2a$10$WSQbOGqimiWjsDI23eNx..qtM789XUpTBD4Qdx6pzpdWDLy4HBs4a",
       "googleId": null,
       "authType": "EMAIL",
-      "lastSignIn": "2025-12-16T15:16:04.558Z",
+      "lastSignIn": "2026-01-05T16:53:56.024Z",
       "createdAt": "2025-10-19T17:20:05.949Z",
-      "updatedAt": "2025-12-16T15:16:04.560Z",
+      "updatedAt": "2026-01-05T16:53:56.025Z",
       "deletedAt": null,
       "activePackage": {
         "id": 22,
@@ -46,5 +46,5 @@
       }
     }
   },
-  "savedAt": 1767542685
+  "savedAt": 1767704924
 }

@@ -23,6 +23,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Check for corrupted venv (missing pip)
+REM Check for corrupted venv (missing pip)
+if not exist "venv_voice\Scripts\python.exe" goto :create_venv
+
+echo Checking venv integrity...
+venv_voice\Scripts\python.exe -m pip --version >nul 2>&1
+if not errorlevel 1 goto :create_venv
+
+echo [WARN] venv_voice check failed (pip missing). Removing corrupted environment...
+rmdir /s /q "venv_voice"
+if exist "venv_voice" (
+    echo [ERROR] Could not delete venv_voice. Please manually delete the folder 'venv_voice' and retry.
+    pause
+    exit /b 1
+)
+
+:create_venv
+
 REM Create virtual environment with Python 3.11
 echo Creating virtual environment with Python 3.11...
 if not exist "venv_voice" (
@@ -34,14 +52,7 @@ if not exist "venv_voice" (
         exit /b 1
     )
     echo.
-    echo Fixing venv paths for portability...
-    REM Fix pyvenv.cfg to use relative paths
-    if exist "venv_voice\pyvenv.cfg" (
-        REM Backup original
-        copy /Y "venv_voice\pyvenv.cfg" "venv_voice\pyvenv.cfg.bak" >nul
-        REM Update to use relative path (will be fixed after copy)
-        powershell -Command "(Get-Content 'venv_voice\pyvenv.cfg') -replace '^home = .*', 'home = .' | Set-Content 'venv_voice\pyvenv.cfg'"
-    )
+    echo.
 ) else (
     echo venv_voice already exists, reusing it.
     echo Note: If this venv was created without --copies, it may not be portable.
@@ -190,12 +201,7 @@ if not exist "venv_voice" (
     exit /b 1
 )
 
-REM Cleanup venv to reduce size before copying
-echo Cleaning unnecessary files from venv_voice...
-for /d /r "venv_voice" %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
-if exist "venv_voice\Include" rd /s /q "venv_voice\Include"
-if exist "venv_voice\Lib\site-packages\pip" rd /s /q "venv_voice\Lib\site-packages\pip"
-
+REM Copy venv_voice to dist first
 echo Copying venv_voice (this may take several minutes)...
 xcopy /E /I /Y "venv_voice" "dist\ToolVoiceCloning\venv_voice" >nul
 if errorlevel 1 (
@@ -208,6 +214,13 @@ if errorlevel 1 (
         exit /b 1
     )
 )
+
+REM Cleanup venv IN DIST FOLDER to reduce size (do NOT touch source venv)
+echo Cleaning unnecessary files from dist venv...
+set "VENV_DIST=dist\ToolVoiceCloning\venv_voice"
+for /d /r "%VENV_DIST%" %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
+if exist "%VENV_DIST%\Include" rd /s /q "%VENV_DIST%\Include"
+if exist "%VENV_DIST%\Lib\site-packages\pip" rd /s /q "%VENV_DIST%\Lib\site-packages\pip"
 
 REM Fix venv paths for portability after copying
 echo Fixing venv paths for portability...
@@ -277,9 +290,23 @@ if exist "tool_voices\install_python.bat" (
 )
 if exist "tool_voices\setup.bat" (
     copy /Y "tool_voices\setup.bat" "dist\ToolVoiceCloning\setup.bat" >nul
-    echo   - setup.bat copied
-) else (
     echo Warning: setup.bat not found
+)
+echo.
+
+REM Copy VC++ Redist DLLs for portability (fix "Failed to load Python DLL" on clean Windows)
+echo Copying VC++ Redist DLLs...
+if exist "C:\Windows\System32\vcruntime140.dll" (
+    copy /Y "C:\Windows\System32\vcruntime140.dll" "dist\ToolVoiceCloning\vcruntime140.dll" >nul
+    if exist "dist\ToolVoiceCloning\_internal" copy /Y "C:\Windows\System32\vcruntime140.dll" "dist\ToolVoiceCloning\_internal\vcruntime140.dll" >nul
+)
+if exist "C:\Windows\System32\msvcp140.dll" (
+    copy /Y "C:\Windows\System32\msvcp140.dll" "dist\ToolVoiceCloning\msvcp140.dll" >nul
+    if exist "dist\ToolVoiceCloning\_internal" copy /Y "C:\Windows\System32\msvcp140.dll" "dist\ToolVoiceCloning\_internal\msvcp140.dll" >nul
+)
+if exist "C:\Windows\System32\vcruntime140_1.dll" (
+    copy /Y "C:\Windows\System32\vcruntime140_1.dll" "dist\ToolVoiceCloning\vcruntime140_1.dll" >nul
+    if exist "dist\ToolVoiceCloning\_internal" copy /Y "C:\Windows\System32\vcruntime140_1.dll" "dist\ToolVoiceCloning\_internal\vcruntime140_1.dll" >nul
 )
 echo.
 

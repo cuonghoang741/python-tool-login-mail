@@ -184,15 +184,70 @@ class VideoLengthTool(ctk.CTk):
         """
         Detect which hardware encoders are available on this system.
         Returns list of available encoder names.
+        
+        Refined logic:
+        1. For NVIDIA (h264_nvenc): Check hardware presence (torch/nvidia-smi) AND ffmpeg support.
+           This mimics 'tool_voices' robustness.
+        2. For others (QSV, AMF): Use functional test.
         """
         available = ["libx264"]  # CPU encoder always available
 
-        # Test each hardware encoder
-        hw_encoders = ["h264_nvenc", "h264_qsv", "h264_amf"]
+        # --- NVIDIA Detection (Robust) ---
+        has_nvidia_hardware = False
+        
+        # 1. Try torch (like tool_voices)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                has_nvidia_hardware = True
+        except ImportError:
+            pass
+            
+        # 2. Try nvidia-smi if torch failed or not installed
+        if not has_nvidia_hardware:
+            try:
+                # Check if nvidia-smi is in PATH and runs
+                subprocess.check_call(
+                    ["nvidia-smi"], 
+                    stdout=subprocess.DEVNULL, 
+                    stderr=subprocess.DEVNULL, 
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                has_nvidia_hardware = True
+            except (FileNotFoundError, subprocess.CalledProcessError, Exception):
+                pass
+
+        if has_nvidia_hardware:
+            # Check if ffmpeg binary supports h264_nvenc
+            try:
+                cmd = [self.ffmpeg_executable, "-v", "error", "-h", "encoder=h264_nvenc"]
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                if result.returncode == 0:
+                    available.append("h264_nvenc")
+            except Exception:
+                # If checking binary fails, fall back to functional test
+                pass
+
+        # --- Other Hardware Encoders (QSV, AMF) or NVENC fallback ---
+        # If NVENC was not added by the robust check (e.g. no hardware found but maybe we missed it?), 
+        # run the functional test just in case, plus check QSV/AMF.
+        
+        hw_encoders = []
+        if "h264_nvenc" not in available:
+            hw_encoders.append("h264_nvenc")
+        
+        # Add others
+        hw_encoders.extend(["h264_qsv", "h264_amf"])
 
         for encoder in hw_encoders:
             try:
                 # Run a quick test to see if encoder is available
+                # Using nullsrc is sometimes safer than color
                 cmd = [
                     self.ffmpeg_executable,
                     "-f", "lavfi",
@@ -204,7 +259,7 @@ class VideoLengthTool(ctk.CTk):
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
-                    timeout=10,
+                    timeout=5, # Reduced timeout for faster startup
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
                 )
                 if result.returncode == 0:
