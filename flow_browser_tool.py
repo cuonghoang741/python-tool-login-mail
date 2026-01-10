@@ -99,7 +99,7 @@ class FlowBrowserTool:
         # Add callback for story tab to execute tab transfer
         self.ui_callbacks['import_excel_and_switch'] = self._import_excel_and_switch_tab
         self.root.title(self.window_title)
-        self.root.geometry("900x650")
+        self.root.geometry("1000x850")
         self.root.resizable(True, True)
         
         # Apply luxury theme
@@ -1122,6 +1122,8 @@ class FlowBrowserTool:
         for i, row in enumerate(ws.iter_rows(values_only=True)):
             if row is None:
                 continue
+            # Ensure index 1-based for Excel
+            row_idx = i + 1
             if is_flow_images:
                 # Columns: prompt, media, aspect_ratio, outputs_per_prompt, model
                 if i == 0 and row and isinstance(row[0], str) and 'prompt' in row[0].lower():
@@ -1132,7 +1134,7 @@ class FlowBrowserTool:
                 outputs = _cell_to_str(row[3]) if len(row) > 3 else ''
                 model = _cell_to_str(row[4]) if len(row) > 4 else ''
                 if prompt.strip():
-                    rows.append({"wf": "frames_to_video", "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+                    rows.append({"wf": "frames_to_video", "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model, "row_idx": row_idx})
             else:
                 # Columns: workflow, prompt, media, aspect_ratio, outputs_per_prompt, model
                 if i == 0 and row and isinstance(row[0], str) and 'workflow' in row[0].lower():
@@ -1144,7 +1146,7 @@ class FlowBrowserTool:
                 outputs = _cell_to_str(row[4]) if len(row) > 4 else ''
                 model = _cell_to_str(row[5]) if len(row) > 5 else ''
                 if wf and prompt.strip():
-                    rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model})
+                    rows.append({"wf": wf, "prompt": prompt, "media": media, "aspect_ratio": aspect_ratio, "outputs": outputs, "model": model, "row_idx": row_idx})
         return rows
 
     def _import_excel_and_dispatch(self) -> None:
@@ -1182,7 +1184,7 @@ class FlowBrowserTool:
                     'model': r.get('model') or ''
                 }
                 # Reuse existing enqueue/start logic per-account, passing settings
-                self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings)
+                self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings, excel_path=path, excel_row=r.get('row_idx'))
             self._log_exec(f"Imported {len(rows)} row(s) from Excel and dispatched to accounts.")
             self._refresh_jobs_view()
         except Exception as ex:
@@ -1221,8 +1223,9 @@ class FlowBrowserTool:
                     'outputs': r.get('outputs') or '',
                     'model': r.get('model') or ''
                 }
+                
                 # Reuse existing enqueue/start logic per-account, passing settings
-                self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings)
+                self._enqueue_or_start_account_job(target_email, meta, wf, prompt, media, settings, excel_path=excel_path, excel_row=r.get('row_idx'))
             
             self._log_exec(f"Imported {len(rows)} row(s) from Excel and dispatched to accounts.")
             self._refresh_jobs_view()
@@ -1280,8 +1283,44 @@ class FlowBrowserTool:
         except Exception as ex:
             messagebox.showerror("Lỗi", f"Không thể tạo template: {ex}")
 
-    def _enqueue_or_start_account_job(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict = None) -> None:
-        job = {"email": email_addr, "meta": meta, "wf": wf, "prompt": prompt, "media": media, "settings": settings or {}}
+    def _update_excel_status(self, excel_path: str, row_idx: int, status: str) -> None:
+        """Update result status to a specific row in the Excel file."""
+        if not excel_path or not row_idx or not os.path.exists(excel_path):
+            return
+        
+        # Use a file lock or crude retry mechanism to avoid contention
+        try:
+            wb = load_workbook(filename=excel_path)
+            ws = wb.active
+            
+            # Identify "Result" column
+            result_col = None
+            header_row = 1
+            max_col = ws.max_column
+            
+            # Check headers
+            for col in range(1, max_col + 1):
+                val = ws.cell(row=header_row, column=col).value
+                if val and str(val).strip().lower() in ("result", "status", "kết quả", "trạng thái"):
+                    result_col = col
+                    break
+            
+            # If not found, create new column at end
+            if not result_col:
+                result_col = max_col + 1
+                ws.cell(row=header_row, column=result_col, value="Result")
+            
+            # Write status
+            ws.cell(row=row_idx, column=result_col, value=status)
+            
+            # Save
+            wb.save(excel_path)
+            wb.close()
+        except Exception as e:
+            self._log_exec(f"Failed to update Excel status (row {row_idx}): {e}", error=True)
+
+    def _enqueue_or_start_account_job(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict = None, excel_path: str = None, excel_row: int = None) -> None:
+        job = {"email": email_addr, "meta": meta, "wf": wf, "prompt": prompt, "media": media, "settings": settings or {}, "excel_path": excel_path, "excel_row": excel_row}
         st = self.account_states.get(email_addr)
         if st is None:
             st = {'queue': [], 'running': False, 'lock': threading.Lock()}
@@ -1296,7 +1335,7 @@ class FlowBrowserTool:
         if action == "queue":
             self._log_exec(f"Queued job for {email_addr} ({wf}) from Excel")
         else:
-            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media, job['settings']), daemon=True).start()
+            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media, job['settings'], excel_path, excel_row), daemon=True).start()
     def _open_flow_for_exec(self) -> None:
         email_addr = self.exec_email.get()
         if not email_addr:
@@ -1355,9 +1394,10 @@ class FlowBrowserTool:
             self._log_exec(f"Queued job for {email_addr} ({wf})")
             self._refresh_jobs_view()
         else:
-            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media, {}), daemon=True).start()
+            threading.Thread(target=self._execute_thread, args=(email_addr, meta, wf, prompt, media, {}, None, None), daemon=True).start()
 
-    def _execute_thread(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict) -> None:
+    def _execute_thread(self, email_addr: str, meta: dict, wf: str, prompt: str, media: str, settings: dict, excel_path: str = None, excel_row: int = None) -> None:
+        job_success = False
         try:
             # Increment job counter for unique indexing
             self.job_counter += 1
@@ -1414,32 +1454,8 @@ class FlowBrowserTool:
                 except Exception:
                     self._log_exec("Failed to select workflow via combobox", error=True)
 
-            # Sau khi chọn workflow, mới nhập prompt
-            self._log_exec("Typing prompt into textarea...")
-            # Gõ prompt vào textarea id=PINHOLE_TEXT_AREA_ELEMENT_ID với tốc độ tối ưu
-            try:
-                area = drv.find_element(By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID")
-                self._human_click_el(drv, area)
-                try:
-                    area.clear()
-                except Exception:
-                    pass
-                if prompt:
-                    # Sử dụng typing nhanh nhất cho prompt
-                    self._fast_type_prompt(area, prompt)
-                    self._log_exec("Prompt typed successfully.")
-                else:
-                    self._log_exec("No prompt provided, skipping typing.")
-            except Exception:
-                # Fallback: bất kỳ textarea nào nếu id không có - sử dụng typing nhanh
-                self._log_exec("PINHOLE_TEXT_AREA_ELEMENT_ID not found, trying fallback textarea...")
-                self._fast_type_into_any(drv, [
-                    (By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID"),
-                    (By.CSS_SELECTOR, "textarea#PINHOLE_TEXT_AREA_ELEMENT_ID"),
-                    (By.CSS_SELECTOR, "textarea")
-                ], prompt)
-
             # Áp dụng các setting trong popover (Aspect ratio, Outputs per prompt, Model)
+            # Áp dụng settings TRƯỚC khi nhập prompt để đảm bảo trạng thái đúng
             try:
                 self._log_exec("Opening settings popover and applying options...")
                 # Prefer per-row settings if provided; fallback to UI selections
@@ -1462,10 +1478,51 @@ class FlowBrowserTool:
                 self._log_exec("Settings applied.")
             except Exception as ex:
                 self._log_exec(f"Failed to apply settings: {ex}", error=True)
+                raise # Stop execution if settings fail
+
+            # Sau khi chọn workflow và setting, mới nhập prompt
+            self._log_exec("Typing prompt into textarea...")
+            # Gõ prompt vào textarea id=PINHOLE_TEXT_AREA_ELEMENT_ID với tốc độ tối ưu
+            try:
+                area = drv.find_element(By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID")
+                self._human_click_el(drv, area)
+                try:
+                    area.clear()
+                except Exception:
+                    pass
+                if prompt:
+                    # Sử dụng typing nhanh nhất cho prompt
+                    self._fast_type_prompt(area, prompt)
+                    
+                    # Verify input content
+                    self._log_exec("Verifying typed prompt...")
+                    for _ in range(20): # Try for 10 seconds
+                        try:
+                            val = area.get_attribute("value")
+                            if val and len(val) >= len(prompt) * 0.9: # 90% match is good enough to proceed
+                                break
+                        except Exception:
+                            pass
+                        time.sleep(0.5)
+                        
+                    self._log_exec("Prompt typed and verified.")
+                else:
+                    self._log_exec("No prompt provided, skipping typing.")
+            except Exception:
+                # Fallback: bất kỳ textarea nào nếu id không có - sử dụng typing nhanh
+                self._log_exec("PINHOLE_TEXT_AREA_ELEMENT_ID not found, trying fallback textarea...")
+                self._fast_type_into_any(drv, [
+                    (By.ID, "PINHOLE_TEXT_AREA_ELEMENT_ID"),
+                    (By.CSS_SELECTOR, "textarea#PINHOLE_TEXT_AREA_ELEMENT_ID"),
+                    (By.CSS_SELECTOR, "textarea")
+                ], prompt)
+                time.sleep(2) # Wait for fallback typing to complete/register
 
             # Với workflow text_to_video: cần nhấn nút 'Tạo' (Create) để execute
             if wf == "text_to_video":
                 try:
+                    self._log_exec("Waiting 3s before clicking 'Tạo'...")
+                    time.sleep(3)
                     self._log_exec("Clicking 'Tạo' (Create) button for text_to_video...")
                     self._click_create_button(drv)
                     self._log_exec("Clicked 'Tạo' successfully.")
@@ -1552,9 +1609,24 @@ class FlowBrowserTool:
                 self._monitor_and_fetch_api(drv, wf=wf, prompt=prompt)
             except Exception as ex:
                 self._log_exec(f"Monitor error: {ex}", error=True)
+                job_success = False
+                raise  # Re-raise to trigger outer exception handler logic
+            
+            # If we reached here without exception, mark success
+            job_success = True
+            
         except Exception as ex:
             self._log_exec(f"Execute error: {ex}", error=True)
+            job_success = False
         finally:
+            # Update Excel status if applicable
+            try:
+                if excel_path and excel_row:
+                    status_str = "Success" if job_success else "Failed"
+                    self._update_excel_status(excel_path, excel_row, status_str)
+            except Exception:
+                pass
+
             try:
                 local_drv = self.exec_drivers.get(email_addr)
                 if local_drv is not None:
@@ -1591,7 +1663,7 @@ class FlowBrowserTool:
                     self._log_exec(f"Starting next queued job for {next_job['email']} ({next_job['wf']})")
                     threading.Thread(
                         target=self._execute_thread,
-                        args=(next_job['email'], next_job['meta'], next_job['wf'], next_job['prompt'], next_job['media'], next_job.get('settings', {})),
+                        args=(next_job['email'], next_job['meta'], next_job['wf'], next_job['prompt'], next_job['media'], next_job.get('settings', {}), next_job.get('excel_path'), next_job.get('excel_row')),
                         daemon=True,
                     ).start()
                 else:
@@ -2588,6 +2660,14 @@ class FlowBrowserTool:
                 raise Exception(f"Failed to click Create button: {ex}")
 
     def _monitor_and_fetch_api(self, driver: webdriver.Chrome, wf: str = None, prompt: str = "") -> None:
+        # Initial reload delay depends on workflow complexity
+        # text_to_video and frames_to_video need more time (60s)
+        # others can default to 30s
+        if wf in ["text_to_video", "frames_to_video"]:
+            initial_reload_delay = 60
+        else:
+            initial_reload_delay = 30
+
         """Theo dõi xử lý đến khi đủ video hoàn tất theo cấu hình Outputs per prompt,
         sau đó reload trang (nếu cần) và đọc API project.searchProjectWorkflows để lấy fifeUri."""
         # Số video kỳ vọng theo cấu hình Outputs per prompt (mặc định 1)
@@ -2713,6 +2793,8 @@ class FlowBrowserTool:
                 return False
 
         def all_videos_ready():
+            # Delay first reload by 60s, then reload every ~10s
+
             try:
                 # For text_to_video, base readiness on cards rather than <video> elements
                 if wf == "text_to_video":
@@ -2792,8 +2874,7 @@ class FlowBrowserTool:
         except Exception:
             pass
 
-        # Delay first reload by 60s, then reload every ~10s
-        initial_reload_delay = 30
+       
         notified_wait = False
         retries_after_initial = 0
         max_retries_after_initial = 5
@@ -2807,7 +2888,7 @@ class FlowBrowserTool:
             if (now - start) < initial_reload_delay:
                 if not notified_wait:
                     try:
-                        self._log_exec("Waiting 60s before first reload to collect media...")
+                        self._log_exec(f"Waiting {initial_reload_delay}s before first reload to collect media...")
                     except Exception:
                         pass
                     notified_wait = True
@@ -3038,6 +3119,8 @@ class FlowBrowserTool:
         # Mở popover Cài đặt
         settings_btn_xp = [
             "//button[.//i[normalize-space(text())='tune']]",
+            "//button[.//span[contains(text(), 'tune')]]",
+            "//button[@aria-label='Settings' or @aria-label='Cài đặt']",
             "//button[.//span[normalize-space(text())='Cài đặt']]",
             "//button[contains(., 'Cài đặt') or contains(., 'Settings')]",
         ]
@@ -3517,44 +3600,55 @@ class FlowBrowserTool:
                 pass
 
     def _fast_type_prompt(self, element, text: str) -> None:
-        """Ultra-fast typing specifically optimized for prompt input.
-        Uses maximum chunk sizes and minimal delays for fastest possible typing.
+        """Hybrid typing: Type first 10 chars manually to trigger events, then Paste the rest.
         """
         try:
             length = len(text or "")
             if length == 0:
                 return
+
+            # 1. Type first 10 characters manually (to wake up inputs)
+            first_chunk_size = 10
+            first_part = text[:first_chunk_size]
+            remaining_part = text[first_chunk_size:]
             
-            # Try to send entire text at once first (fastest possible)
-            try:
-                element.send_keys(text)
+            for ch in first_part:
+                element.send_keys(ch)
+                # Small random delay for realism
+                time.sleep(random.uniform(0.02, 0.05))
+            
+            if not remaining_part:
                 return
+
+            # 2. Paste the rest
+            try:
+                # Use Tkinter to set clipboard
+                self.root.clipboard_clear()
+                self.root.clipboard_append(remaining_part)
+                self.root.update()  # Required to finalize clipboard update
+                
+                # Small delay to ensure clipboard is ready
+                time.sleep(0.2)
+                
+                # Send Ctrl+V
+                element.send_keys(Keys.CONTROL, 'v')
+                time.sleep(0.1)
             except Exception:
-                pass
-            
-            # If that fails, use very large chunks with minimal delay
-            if length >= 1000:
-                chunk_size = 500  # Huge chunks for very long prompts
-            elif length >= 500:
-                chunk_size = 250  # Very large chunks for long prompts
-            elif length >= 200:
-                chunk_size = 100  # Large chunks for medium prompts
-            else:
-                chunk_size = 50   # Medium chunks for shorter prompts
-            
-            for i in range(0, length, chunk_size):
-                chunk = text[i:i+chunk_size]
-                element.send_keys(chunk)
-                # Ultra-minimal delay - only 0.0001s between chunks
-                time.sleep(0.0001)
+                # Fallback if paste fails: type the rest using chunks
+                chunk_size = 50
+                for i in range(0, len(remaining_part), chunk_size):
+                    chunk = remaining_part[i:i+chunk_size]
+                    element.send_keys(chunk)
+                    time.sleep(0.01)
+
         except Exception:
-            # Last resort: per-character with absolute minimal delay
+            # Global fallback: per-character
             for ch in text:
                 try:
                     element.send_keys(ch)
                 except Exception:
                     continue
-                time.sleep(0.0001)
+                time.sleep(0.001)
 
     def _human_type_el(self, element, text: str) -> None:
         """Type text into an element with optimized speed for prompt input.
@@ -3670,21 +3764,8 @@ def main() -> None:
                             pass
             except Exception:
                 pass
-            # Thử buộc đóng toàn bộ tiến trình Chrome/ChromeDriver còn lại trên Windows
-            try:
-                import subprocess
-                # Đóng tất cả chrome.exe
-                try:
-                    subprocess.run(["taskkill", "/IM", "chrome.exe", "/F"], capture_output=True)
-                except Exception:
-                    pass
-                # Đóng tất cả chromedriver.exe
-                try:
-                    subprocess.run(["taskkill", "/IM", "chromedriver.exe", "/F"], capture_output=True)
-                except Exception:
-                    pass
-            except Exception:
-                pass
+            # Thử buộc đóng toàn bộ tiến trình Chrome/ChromeDriver còn lại trên Windows -> REMOVED because it kills user browsers
+            # Only rely on driver.quit() above which is safe.
         except Exception:
             pass
         try:

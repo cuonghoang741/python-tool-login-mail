@@ -5,6 +5,7 @@ import json
 import time
 import threading
 import random
+import re
 from typing import List, Dict, Any
 
 import requests
@@ -255,12 +256,27 @@ Trong chiếc thuyền, chú tìm thấy một bản đồ kho báu và bắt đ
         self.story_style.set("Hành động phiêu lưu")
         self.story_style.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
 
+        # Video style
+        ttk.Label(config_frame, text="Loại video (Style):", 
+                 font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky=tk.W, pady=(8, 0))
+        
+        self.video_style = ttk.Combobox(config_frame, values=[
+            "Hoạt hình 2D",
+            "Hoạt hình 3D", 
+            "Stop motion",
+            "Live-action (phim người thật)",
+            "Motion graphics",
+            "Video kỹ xảo (VFX)"
+        ], state="readonly", width=25)
+        self.video_style.set("Hoạt hình 3D")
+        self.video_style.grid(row=2, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
+
         # API key mode (default vs custom)
         ttk.Label(config_frame, text="Gemini API key:", 
-                 font=("Segoe UI", 10, "bold")).grid(row=2, column=0, sticky=tk.W, pady=(8, 0))
+                 font=("Segoe UI", 10, "bold")).grid(row=3, column=0, sticky=tk.W, pady=(8, 0))
 
         api_key_mode_frame = ttk.Frame(config_frame)
-        api_key_mode_frame.grid(row=2, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
+        api_key_mode_frame.grid(row=3, column=1, sticky=tk.W, padx=(10, 0), pady=(8, 0))
 
         self.api_key_default_rb = ttk.Radiobutton(
             api_key_mode_frame,
@@ -439,7 +455,9 @@ YÊU CẦU MÔ TẢ CỰC KỲ CHI TIẾT (40-60 từ mỗi nhân vật):
 Câu chuyện gốc:
 {story_text}
 
-Hãy trả về danh sách 4-6 mô tả nhân vật CỰC KỲ CHI TIẾT khác nhau, mỗi mô tả trên một dòng, không đánh số thứ tự.
+Hãy trả về danh sách các mô tả nhân vật CỰC KỲ CHI TIẾT khác nhau.
+ĐỊNH DẠNG BẮT BUỘC: Mỗi dòng bắt đầu bằng "**Tên Nhân Vật**: Mô tả..." (Hãy đặt tên nhân vật trong dấu sao đôi và có dấu hai chấm).
+Tuyệt đối chỉ trả về danh sách nhân vật, không có lời dẫn.
 """
             
             # Generate character descriptions
@@ -448,12 +466,25 @@ Hãy trả về danh sách 4-6 mô tả nhân vật CỰC KỲ CHI TIẾT khác 
             
             # Parse character prompts
             character_prompts = []
+            character_names = []
+            
             for line in character_text.split('\n'):
                 line = line.strip()
                 if line and not line.isdigit():
                     character_prompts.append(line)
+                    # Extract name
+                    # Match **Name**: or Name:
+                    m = re.match(r'\*\*?(.*?)\*\*?:', line)
+                    if m:
+                        character_names.append(m.group(1).strip())
+                    else:
+                        # Try split by colon
+                        parts = line.split(':', 1)
+                        if len(parts) > 1:
+                            character_names.append(parts[0].strip().replace('*', ''))
             
             self.character_prompts = character_prompts
+            available_names_str = ", ".join(character_names) if character_names else "các nhân vật đã tạo"
             
             # Update character text area
             self._update_character_text_area()
@@ -466,14 +497,20 @@ Hãy trả về danh sách 4-6 mô tả nhân vật CỰC KỲ CHI TIẾT khác 
             base_instruction = f"""
 Bạn là một chuyên gia tạo prompt cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo prompt ngắn gọn và hấp dẫn cho việc tạo video.
 
+Danh sách nhân vật hiện có: {available_names_str}
+
 Yêu cầu:
-- Mỗi prompt phải bắt đầu bằng "Chỉ sử dụng nhân vật: [tên nhân vật 1, tên nhân vật 2, ...], " sau đó mới là nội dung câu chuyện
+- Bắt đầu bằng: "Chỉ sử dụng nhân vật: [Tên 1, Tên 2], " sau đó mới là nội dung.
+- QUAN TRỌNG: Phải dùng CHÍNH XÁC tên trong danh sách nhân vật trên (copy y nguyên). Nếu nhiều nhân vật thì cách nhau dấu phẩy trong ngoặc vuông.
+- Nếu không có nhân vật nào cụ thể trong cảnh, dùng "Chỉ sử dụng nhân vật: [Khung cảnh], "
 - Mỗi prompt phải là một câu mô tả câu chuyện, hoặc lời thoại nếu có
 - Tập trung vào phong cách: {style}
 - Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện, theo thứ tự tiến triển tự nhiên
 - Sử dụng từ ngữ sinh động, có tính hình ảnh
 - Tránh lặp lại nội dung giữa các prompt
 - Phù hợp để tạo video ngắn (5-10 giây mỗi prompt)
+
+Tuyệt đối đừng nói bất kỳ từ thừa thãi nào không liên quan đến yêu cầu.
 
 Câu chuyện gốc:
 {story_text}
@@ -487,17 +524,17 @@ Câu chuyện gốc:
 Tin nhắn trước đó (giữ nguyên yêu cầu):
 {base_instruction}
 
-Các prompt đã tạo trước đó (giữ nguyên thứ tự):
+Các prompt đã tạo trước đó (giữ nguyên thứ tự từ Scene 1 đến Scene {len(prompts)}):
 {chr(10).join(prompts)}
 
-Hãy tạo thêm {batch_size} prompt MỚI tiếp nối mạch truyện, không trùng lặp, mỗi prompt trên một dòng, không đánh số.
+Hãy tạo thêm {batch_size} prompt MỚI tiếp nối mạch truyện (Scene {len(prompts) + 1} đến Scene {len(prompts) + batch_size}), không trùng lặp, mỗi prompt trên một dòng, không đánh số.
 """
                     prompt_text = continuation_instruction
                 else:
                     first_batch_instruction = f"""
 {base_instruction}
 
-Hãy trả về danh sách {batch_size} prompt đầu tiên, mỗi prompt trên một dòng, không đánh số thứ tự.
+Hãy trả về danh sách {batch_size} prompt đầu tiên (từ Scene 1 đến Scene {batch_size}), mỗi prompt trên một dòng.
 """
                     prompt_text = first_batch_instruction
 
@@ -516,6 +553,18 @@ Hãy trả về danh sách {batch_size} prompt đầu tiên, mỗi prompt trên 
 
                 # Fallback: if the model returned fewer than requested, still proceed
                 if new_items:
+                    # Programmatically add [Scene N]: prefix
+                    start_idx = len(prompts)
+                    for idx, item in enumerate(new_items):
+                        scene_num = start_idx + idx + 1
+                        # Avoid double prefix if AI hallucinated it (check potential old and new format)
+                        if not re.match(r'^\[Scene(?:_)?\d+(?:_)?\]:', item, re.IGNORECASE):
+                            new_items[idx] = f"[Scene_{scene_num}_]: {item}"
+                        else:
+                             # Normalize hallucinated prefix numbers
+                             item = re.sub(r'^\[Scene(?:_)?\d+(?:_)?\]:\s*', '', item, flags=re.IGNORECASE)
+                             new_items[idx] = f"[Scene_{scene_num}_]: {item}"
+                    
                     prompts.extend(new_items)
                 else:
                     # Break to avoid infinite loop if nothing returned
@@ -527,20 +576,85 @@ Hãy trả về danh sách {batch_size} prompt đầu tiên, mỗi prompt trên 
             # Always combine character prompts with story prompts
             story_prompts = prompts[:num_prompts]
             combined_prompts = []
-            print(f"DEBUG: Character prompts available: {len(self.character_prompts)}")
-            print(f"DEBUG: Character prompts: {self.character_prompts}")
-            print(f"DEBUG: Story prompts: {story_prompts}")
-            
-            # Get all character descriptions as a single prefix
-            character_prefix = ""
-            if self.character_prompts:
-                character_prefix = ", ".join(self.character_prompts) + ", "
             
             for story_prompt in story_prompts:
-                # Use the same character prefix for all story prompts
-                combined_prompt = f"{character_prefix}\n\n{story_prompt}"
-                print(f"DEBUG: Combined prompt with character prefix: {combined_prompt}")
+                # Filter character descriptions based on the prompt content
+                selected_descriptions = []
+                
+                # Check for [Name1, Name2] format in "Chỉ sử dụng nhân vật: [...]"
+                # Regex matches anything inside brackets after the intro phrase
+                match = re.search(r"chỉ sử dụng nhân vật:.*?\[(.*?)\].*?", story_prompt, re.IGNORECASE)
+                
+                if match:
+                    names_str = match.group(1)
+                    # Split by comma
+                    names_found = [n.strip() for n in names_str.split(',') if n.strip()]
+                    
+                    if names_found and self.character_prompts:
+                        for desc in self.character_prompts:
+                            # Try to match the name extracted with the description
+                            # Description format expected: "**Name**: Desc" or "Name: Desc"
+                            # We check if the 'name found' is contained in the 'description' (start of it)
+                            # Or if the parsed name from description matches
+                            
+                            desc_lower = desc.lower()
+                            for name in names_found:
+                                name_lower = name.lower()
+                                # Check if description starts with name (approx) or contains name followed by colon
+                                if name_lower in desc_lower.split(':')[0]:
+                                    selected_descriptions.append(desc)
+                                    break
+                
+                # Fallback handled: if selected_descriptions is empty, we MIGHT want to include all, 
+                # OR if it's "Khung cảnh" (Scene), maybe we include none?
+                # User logic: "Nếu không tìm thấy, fallback về all" (from previous code implicit logic).
+                # But if prompt says "Khung cảnh", maybe we don't want characters.
+                # Let's keep strict "if names found but no match in descriptions, usage might be empty or wrong".
+                # To be safe and follow user "unify" request, let's just stick to the mapping.
+                
+                # If we parsed [Name] but found no description, maybe it's a hallucination or exact match failed.
+                # Try partial match? We already did (name in desc_lower.split(':')[0]).
+                
+                if not selected_descriptions:
+                    # If regex failed completely (no [...] pattern), fallback to ALL characters (safe)
+                    if not match:
+                        selected_descriptions = self.character_prompts
+                
+                # Extract Scene prefix
+                scene_prefix = ""
+                # story_prompt format is "[Scene N]: Content". We want to extract "[Scene N]:"
+                # Extract Scene prefix (handling both [Scene N]: and [Scene_N_]: just in case)
+                scene_prefix = ""
+                # Support both old "[Scene N]:" and new "[Scene_N_]:"
+                match_scene = re.match(r'^(\[Scene(?:_)?\d+(?:_)?\]:)\s*(.*)', story_prompt, re.DOTALL | re.IGNORECASE)
+                if match_scene:
+                    scene_prefix = match_scene.group(1)
+                    actual_content = match_scene.group(2)
+                else:
+                    actual_content = story_prompt
+
+                character_part = ", ".join(selected_descriptions) + ", " if selected_descriptions else ""
+
+                # Add video style prefix
+                vid_style = self.video_style.get()
+                style_prefix = f"Create video {vid_style}." if vid_style else ""
+                
+                # Construct combined prompt: [Scene N]: Create [Style]. CharDesc, \n\n Content
+                parts = []
+                if style_prefix:
+                    parts.append(style_prefix)
+                if character_part:
+                    parts.append(character_part)
+                
+                middle_part = " ".join(parts)
+                
+                if middle_part:
+                    combined_prompt = f"{scene_prefix} {middle_part}\n\n{actual_content}"
+                else:
+                    combined_prompt = f"{scene_prefix} {actual_content}"
+                
                 combined_prompts.append(combined_prompt)
+            
             self.generated_prompts = combined_prompts
             print(f"DEBUG: Final generated prompts: {self.generated_prompts}")
             
@@ -558,7 +672,7 @@ Hãy trả về danh sách {batch_size} prompt đầu tiên, mỗi prompt trên 
                 self._update_status("❌ Lỗi: Model Gemini không tồn tại hoặc không được hỗ trợ", "red")
                 messagebox.showerror("Lỗi", "Model Gemini không tồn tại hoặc không được hỗ trợ. Vui lòng kiểm tra API key hoặc thử lại sau.")
             elif "API key" in error_msg or "authentication" in error_msg.lower():
-                self._update_status("❌ Lỗi: API key không hợp lệ", "red")
+                self._update_status(f"❌ Lỗi: API key không hợp lệ {error_msg}", "red")
                 messagebox.showerror("Lỗi", "API key không hợp lệ. Vui lòng kiểm tra lại API key.")
             else:
                 self._update_status(f"❌ Lỗi khi tạo prompts: {error_msg}", "red")
@@ -770,11 +884,27 @@ Hãy trả về danh sách {batch_size} prompt đầu tiên, mỗi prompt trên 
             style = self.story_style.get()
             num_prompts = len(self.generated_prompts) if self.generated_prompts else 10
             
+            # Extract names for instruction
+            character_names = []
+            for line in self.character_prompts:
+                m = re.match(r'\*\*?(.*?)\*\*?:', line)
+                if m:
+                    character_names.append(m.group(1).strip())
+                else:
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        character_names.append(parts[0].strip().replace('*', ''))
+            available_names_str = ", ".join(character_names) if character_names else "các nhân vật đã tạo"
+
             system_prompt = f"""
 Bạn là một chuyên gia tạo prompt cho video AI. Dựa trên câu chuyện được mô tả, hãy tạo {num_prompts} prompt ngắn gọn và hấp dẫn cho việc tạo video.
 
+Danh sách nhân vật hiện có: {available_names_str}
+
 Yêu cầu:
-- Mỗi prompt phải bắt đầu bằng "Chỉ sử dụng nhân vật: [tên nhân vật 1, tên nhân vật 2, ...], " sau đó mới là nội dung câu chuyện
+- Bắt đầu bằng: "Chỉ sử dụng nhân vật: [Tên 1, Tên 2], " sau đó mới là nội dung.
+- QUAN TRỌNG: Phải dùng CHÍNH XÁC tên trong danh sách nhân vật trên (copy y nguyên). Nếu nhiều nhân vật thì cách nhau dấu phẩy trong ngoặc vuông.
+- Nếu không có nhân vật nào cụ thể trong cảnh, dùng "Chỉ sử dụng nhân vật: [Khung cảnh], "
 - Mỗi prompt phải là một câu hoặc cụm từ ngắn gọn (dưới 30 từ)
 - Tập trung vào phong cách: {style}
 - Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện
@@ -797,19 +927,77 @@ Hãy trả về danh sách {num_prompts} prompt, mỗi prompt trên một dòng,
             prompts = []
             for line in generated_text.split('\n'):
                 line = line.strip()
+                line = line.strip()
                 if line and not line.isdigit():
+                    # Add [Scene_N_] prefix programmatically
+                    scene_num = len(prompts) + 1
+                    # Avoid double prefix
+                    if not re.match(r'^\[Scene(?:_)?\d+(?:_)?\]:', line, re.IGNORECASE):
+                        line = f"[Scene_{scene_num}_]: {line}"
+                    else:
+                        line = re.sub(r'^\[Scene(?:_)?\d+(?:_)?\]:\s*', '', line, flags=re.IGNORECASE)
+                        line = f"[Scene_{scene_num}_]: {line}"
                     prompts.append(line)
             
             # Combine with character prompts
             combined_prompts = []
-            # Get all character descriptions as a single prefix
-            character_prefix = ""
-            if self.character_prompts:
-                character_prefix = ", ".join(self.character_prompts) + ", "
             
             for story_prompt in prompts:
-                # Use the same character prefix for all story prompts
-                combined_prompt = f"{character_prefix}\n\n{story_prompt}"
+                # Filter character descriptions based on the prompt content
+                selected_descriptions = []
+                
+                # Check for [Name1, Name2] format in "Chỉ sử dụng nhân vật: [...]"
+                match = re.search(r"chỉ sử dụng nhân vật:.*?\[(.*?)\].*?", story_prompt, re.IGNORECASE)
+                
+                if match:
+                    names_str = match.group(1)
+                    names_found = [n.strip() for n in names_str.split(',') if n.strip()]
+                    
+                    if names_found and self.character_prompts:
+                        for desc in self.character_prompts:
+                            desc_lower = desc.lower()
+                            for name in names_found:
+                                name_lower = name.lower()
+                                if name_lower in desc_lower.split(':')[0]:
+                                    selected_descriptions.append(desc)
+                                    break
+                
+                if not selected_descriptions:
+                    if not match:
+                        selected_descriptions = self.character_prompts
+
+                # Extract Scene prefix
+                scene_prefix = ""
+                # story_prompt format is "[Scene N]: Content". We want to extract "[Scene N]:"
+                # Extract Scene prefix
+                scene_prefix = ""
+                match_scene = re.match(r'^(\[Scene(?:_)?\d+(?:_)?\]:)\s*(.*)', story_prompt, re.DOTALL | re.IGNORECASE)
+                if match_scene:
+                    scene_prefix = match_scene.group(1)
+                    actual_content = match_scene.group(2)
+                else:
+                    actual_content = story_prompt
+
+                character_part = ", ".join(selected_descriptions) + ", " if selected_descriptions else ""
+
+                # Add video style prefix
+                vid_style = self.video_style.get()
+                style_prefix = f"Create video {vid_style}." if vid_style else ""
+                
+                # Construct combined prompt: [Scene N]: Create [Style]. CharDesc, \n\n Content
+                parts = []
+                if style_prefix:
+                    parts.append(style_prefix)
+                if character_part:
+                    parts.append(character_part)
+                
+                middle_part = " ".join(parts)
+                
+                if middle_part:
+                    combined_prompt = f"{scene_prefix} {middle_part}\n\n{actual_content}"
+                else:
+                    combined_prompt = f"{scene_prefix} {actual_content}"
+                
                 combined_prompts.append(combined_prompt)
             
             self.generated_prompts = combined_prompts
