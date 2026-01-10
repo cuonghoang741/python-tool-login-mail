@@ -164,5 +164,20 @@
   "[ERROR] 16:28:45 | Thất bại: Không tìm thấy kết quả để tải từ API. Tiến trình được đánh dấu thất bại.\n",
   "[ERROR] 16:29:11 | Could not find workflow text for 'text_to_video', using fallback logic\n",
   "[ERROR] 16:30:12 | Could not find workflow text for 'text_to_video', using fallback logic\n",
-  "[ERROR] 16:32:55 | Could not find workflow text for 'text_to_video', using fallback logic\n"
+  "[ERROR] 16:32:55 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:28:34 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:30:25 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:32:10 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:33:45 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:35:20 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:43:40 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:45:14 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:47:01 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:48:35 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:50:14 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:50:17 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:51:52 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:52:02 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:53:29 | Could not find workflow text for 'text_to_video', using fallback logic\n",
+  "[ERROR] 21:58:06 | Lỗi: API key không hợp lệ. Vui lòng kiểm tra lại API key.\n"
 ]

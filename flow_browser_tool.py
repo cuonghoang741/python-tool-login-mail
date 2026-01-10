@@ -124,6 +124,7 @@ class FlowBrowserTool:
         self.account_states = {}
         self.exec_current_jobs = {}
         self.exec_drivers = {}
+        self.downloaded_urls_cache = set()
         # Job counter for unique indexing
         self.job_counter = 0
 
@@ -1404,10 +1405,25 @@ class FlowBrowserTool:
             current_job_index = self.job_counter
             self._log_exec(f"Starting job #{current_job_index} for {email_addr}")
             
-            self._log_exec("Opening Flow page...")
-            drv = self._open_profile_driver(meta)
-            # Track driver per account to allow concurrent runs
-            self.exec_drivers[email_addr] = drv
+            # Check for existing valid driver
+            drv = self.exec_drivers.get(email_addr)
+            reusing_driver = False
+            if drv:
+                try:
+                    # Check if alive
+                    _ = drv.title
+                    reusing_driver = True
+                    self._log_exec("Reusing existing browser session...")
+                except Exception:
+                    reusing_driver = False
+                    self.exec_drivers.pop(email_addr, None)
+
+            if not reusing_driver:
+                self._log_exec("Opening Flow page...")
+                drv = self._open_profile_driver(meta)
+                # Track driver per account to allow concurrent runs
+                self.exec_drivers[email_addr] = drv
+            
             self.stop_exec = False
             # Store current job index for download naming
             self.current_job_index = current_job_index
@@ -1418,32 +1434,34 @@ class FlowBrowserTool:
                 self._refresh_jobs_view()
             except Exception:
                 pass
-            wait = WebDriverWait(drv, 30)
-            drv.get("https://labs.google/fx/vi/tools/flow")
-            loaded = self._wait_until(lambda: "labs.google" in drv.current_url, timeout=120)
-            if not loaded:
-                self._log_exec("Failed to load Flow page", error=True)
-                return
-            time.sleep(5)
+            
+            if not reusing_driver:
+                wait = WebDriverWait(drv, 30)
+                drv.get("https://labs.google/fx/vi/tools/flow")
+                loaded = self._wait_until(lambda: "labs.google" in drv.current_url, timeout=120)
+                if not loaded:
+                    self._log_exec("Failed to load Flow page", error=True)
+                    return
+                time.sleep(5)
 
-            # Choose workflow
-            self._log_exec("Click New project (if visible)...")
-            try:
-                ready = self._ensure_workspace_ready(drv, max_attempts=3, wait_seconds=10)
-                if not ready:
-                    self._log_exec("Workspace not detected after retries. Continuing best-effort...", error=False)
-            except Exception:
-                self._log_exec("New project button not found - continue")
-
-            # For images variant: ensure the Images radio is selected before proceeding
-            if self.force_images_mode:
+                # Choose workflow
+                self._log_exec("Click New project (if visible)...")
                 try:
-                    self._log_exec("Switching to Images mode...")
-                    self._select_images_mode(drv)
-                    self._log_exec("Images mode selected.")
-                except Exception as ex:
-                    self._log_exec(f"Failed to select Images mode: {ex}", error=True)
-                    raise
+                    ready = self._ensure_workspace_ready(drv, max_attempts=3, wait_seconds=10)
+                    if not ready:
+                        self._log_exec("Workspace not detected after retries. Continuing best-effort...", error=False)
+                except Exception:
+                    self._log_exec("New project button not found - continue")
+
+                # For images variant: ensure the Images radio is selected before proceeding
+                if self.force_images_mode:
+                    try:
+                        self._log_exec("Switching to Images mode...")
+                        self._select_images_mode(drv)
+                        self._log_exec("Images mode selected.")
+                    except Exception as ex:
+                        self._log_exec(f"Failed to select Images mode: {ex}", error=True)
+                        raise
 
             # Mở combobox chọn workflow và chọn theo wf TRƯỚC (bỏ qua khi force_images_mode)
             if not self.force_images_mode:
@@ -1531,7 +1549,7 @@ class FlowBrowserTool:
                     time.sleep(5)
                     self._log_exec("Monitoring processing and then reading API logs...")
                     self._monitor_and_fetch_api(drv, wf="text_to_video", prompt=prompt)
-                    return
+                    job_success = True
                 except Exception as ex:
                     self._log_exec(f"Failed to click Create button for text_to_video: {ex}", error=True)
                     # Đánh dấu thất bại ngay khi không nhấn được nút Tạo
@@ -1542,78 +1560,75 @@ class FlowBrowserTool:
                     # Dừng tiến trình hiện tại
                     raise
 
-            # Apply config if UI exposes inputs (best-effort)
-            # (Removed) basic config for resolution/duration/fps per user request
-
             # Upload media: chỉ áp dụng cho frames_to_video
-            if wf == "frames_to_video" and self.enable_media_upload:
-                if media:
-                    try:
-                        self._log_exec("Waiting 3s after workflow selection before opening add panel...")
-                        time.sleep(3)
-                        self._log_exec("Opening frames upload panel...")
-                        self._open_frames_upload_panel(drv)
-                    except Exception:
-                        self._log_exec("Could not open frames upload panel (will still try upload)")
-                    self._log_exec("Uploading media (frames)...")
-                    self._upload_media_any(drv, media)
-                    self._log_exec("Upload step finished (best-effort).")
-                    # Nhấn "Cắt và lưu" và đợi đến khi xuất hiện khung hình đầu tiên
-                    try:
-                        self._log_exec("Clicking 'Cắt và lưu' and waiting for first frame...")
-                        self._confirm_crop_and_wait_first_frame(drv)
-                        self._log_exec("First frame detected.")
-                    except Exception:
-                        self._log_exec("Could not confirm crop/save or detect first frame", error=True)
-                else:
-                    self._log_exec("Flow Images: no media provided, skip upload/crop")
+            elif wf == "frames_to_video":
+                if self.enable_media_upload:
+                    if media:
+                        try:
+                            self._log_exec("Waiting 3s after workflow selection before opening add panel...")
+                            time.sleep(3)
+                            self._log_exec("Opening frames upload panel...")
+                            self._open_frames_upload_panel(drv)
+                        except Exception:
+                            self._log_exec("Could not open frames upload panel (will still try upload)")
+                        self._log_exec("Uploading media (frames)...")
+                        self._upload_media_any(drv, media)
+                        self._log_exec("Upload step finished (best-effort).")
+                        # Nhấn "Cắt và lưu" và đợi đến khi xuất hiện khung hình đầu tiên
+                        try:
+                            self._log_exec("Clicking 'Cắt và lưu' and waiting for first frame...")
+                            self._confirm_crop_and_wait_first_frame(drv)
+                            self._log_exec("First frame detected.")
+                        except Exception:
+                            self._log_exec("Could not confirm crop/save or detect first frame", error=True)
+                    else:
+                        self._log_exec("Flow Images: no media provided, skip upload/crop")
 
-                # Sau upload (hoặc skip), nhấn nút Tạo
+                    # Sau upload (hoặc skip), nhấn nút Tạo
+                    try:
+                        self._log_exec("Clicking 'Tạo' (Create) button...")
+                        self._click_create_button(drv)
+                        self._log_exec("Clicked 'Tạo' successfully.")
+                    except Exception as ex:
+                        self._log_exec(f"Failed to click Create button for frames_to_video: {ex}", error=True)
+                        try:
+                            messagebox.showerror("Thất bại", "Không nhấn được nút 'Tạo'. Tiến trình được đánh dấu thất bại.")
+                        except Exception:
+                            pass
+                        raise
+
+                    # Monitor ngay cho Flow Images, còn lại vẫn chờ
+                    if getattr(self, "force_images_mode", False):
+                        self._log_exec("Flow Images mode: skip long wait before monitor")
+                    else:
+                        self._log_exec("Waiting 100s before monitoring processing...")
+                        time.sleep(90)
+                    self._log_exec("Monitoring processing and then reading API logs...")
+                    self._monitor_and_fetch_api(drv, wf="frames_to_video", prompt=prompt)
+                    job_success = True
+
+            # Execute/Run fallback
+            else:
+                self._log_exec("Submitting job...")
+                self._try_click_any(drv, [
+                    "//button[contains(., 'Run')]",
+                    "//button[contains(., 'Generate')]",
+                    "//button[contains(., 'Create')]",
+                    "//*[contains(text(), 'Run')]",
+                    "//*[contains(text(), 'Generate')]",
+                ])
+
+                self._log_exec("Request submitted. Monitoring for completion...", success=False)
+                # For all workflows, monitor until outputs ready, then read API
                 try:
-                    self._log_exec("Clicking 'Tạo' (Create) button...")
-                    self._click_create_button(drv)
-                    self._log_exec("Clicked 'Tạo' successfully.")
+                    # small delay to allow rendering to start
+                    time.sleep(5)
+                    self._monitor_and_fetch_api(drv, wf=wf, prompt=prompt)
+                    job_success = True
                 except Exception as ex:
-                    self._log_exec(f"Failed to click Create button for frames_to_video: {ex}", error=True)
-                    try:
-                        messagebox.showerror("Thất bại", "Không nhấn được nút 'Tạo'. Tiến trình được đánh dấu thất bại.")
-                    except Exception:
-                        pass
-                    raise
-
-                # Monitor ngay cho Flow Images, còn lại vẫn chờ
-                if getattr(self, "force_images_mode", False):
-                    self._log_exec("Flow Images mode: skip long wait before monitor")
-                else:
-                    self._log_exec("Waiting 100s before monitoring processing...")
-                    time.sleep(90)
-                self._log_exec("Monitoring processing and then reading API logs...")
-                self._monitor_and_fetch_api(drv, wf="frames_to_video", prompt=prompt)
-                return
-
-            # Execute/Run
-            self._log_exec("Submitting job...")
-            self._try_click_any(drv, [
-                "//button[contains(., 'Run')]",
-                "//button[contains(., 'Generate')]",
-                "//button[contains(., 'Create')]",
-                "//*[contains(text(), 'Run')]",
-                "//*[contains(text(), 'Generate')]",
-            ])
-
-            self._log_exec("Request submitted. Monitoring for completion...", success=False)
-            # For all workflows, monitor until outputs ready, then read API
-            try:
-                # small delay to allow rendering to start
-                time.sleep(5)
-                self._monitor_and_fetch_api(drv, wf=wf, prompt=prompt)
-            except Exception as ex:
-                self._log_exec(f"Monitor error: {ex}", error=True)
-                job_success = False
-                raise  # Re-raise to trigger outer exception handler logic
-            
-            # If we reached here without exception, mark success
-            job_success = True
+                    self._log_exec(f"Monitor error: {ex}", error=True)
+                    job_success = False
+                    raise  # Re-raise to trigger outer exception handler logic
             
         except Exception as ex:
             self._log_exec(f"Execute error: {ex}", error=True)
@@ -1627,17 +1642,8 @@ class FlowBrowserTool:
             except Exception:
                 pass
 
-            try:
-                local_drv = self.exec_drivers.get(email_addr)
-                if local_drv is not None:
-                    local_drv.quit()
-            except Exception:
-                pass
-            try:
-                if email_addr in self.exec_drivers:
-                    del self.exec_drivers[email_addr]
-            except Exception:
-                pass
+            # IMPORTANT: Do not close driver here to support session reuse
+            
             self.stop_exec = False
             # clear current job and refresh
             try:
@@ -2938,6 +2944,8 @@ class FlowBrowserTool:
                             norm = self._normalize_media_url(u)
                         except Exception:
                             norm = u
+                        if norm in self.downloaded_urls_cache:
+                            continue
                         if norm not in collected_url_map:
                             collected_url_map[norm] = u
                 except Exception:
@@ -2969,12 +2977,8 @@ class FlowBrowserTool:
             self._log_exec(f"Found {len(all_urls)} media URL(s) from API. Downloading...")
             self._download_files(all_urls, prompt)
             try:
-                self._log_exec("Job completed. Closing browser now and continuing queue...", success=True)
-                try:
-                    if self.exec_driver is not None:
-                        self.exec_driver.quit()
-                except Exception:
-                    pass
+                self._log_exec("Job completed. Continuing queue...", success=True)
+                # Do not quit driver here to allow reuse
                 return
             except Exception:
                 pass
@@ -3098,6 +3102,11 @@ class FlowBrowserTool:
                                 raise e
                             time.sleep(1.5)
                     self._log_exec(f"Downloaded {dest.name}", success=True)
+                    try:
+                        norm = self._normalize_media_url(url)
+                        self.downloaded_urls_cache.add(norm)
+                    except Exception:
+                        pass
                 except Exception as ex:
                     self._log_exec(f"Failed to download #{i}: {ex}", error=True)
             # No popup: silently finish; the outer finally will close browser and continue queue

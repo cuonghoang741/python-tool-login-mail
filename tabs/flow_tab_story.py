@@ -508,7 +508,8 @@ Yêu cầu:
 - Mỗi prompt phải mô tả một cảnh/quãng khác nhau của câu chuyện, theo thứ tự tiến triển tự nhiên
 - Sử dụng từ ngữ sinh động, có tính hình ảnh
 - Tránh lặp lại nội dung giữa các prompt
-- Phù hợp để tạo video ngắn (5-10 giây mỗi prompt)
+- Phù hợp để tạo video ngắn (10 giây mỗi prompt)
+- Mô tả chi tiết và đầy đủ mỗi cảnh khoảng 50 words
 
 Tuyệt đối đừng nói bất kỳ từ thừa thãi nào không liên quan đến yêu cầu.
 

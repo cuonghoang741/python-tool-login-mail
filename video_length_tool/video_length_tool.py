@@ -174,6 +174,20 @@ class VideoLengthTool(ctk.CTk):
         self.merge_encoder_var = ctk.StringVar(value="libx264")
         self.merge_speed_preset_var = ctk.StringVar(value="balanced")
         self.merge_trim_var = ctk.BooleanVar(value=True)  # Trim 1s from start/end, default ON
+        self.merge_trim_var = ctk.BooleanVar(value=True)  # Trim 1s from start/end, default ON
+        self.merge_mute_var = ctk.BooleanVar(value=True)
+        self.merge_image_duration_var = ctk.StringVar(value="5")
+        
+        # Merge Clips - Music List
+        self.merge_music_files: list[str] = []
+        # Merge Clips - Voice List
+        self.merge_voice_files: list[str] = []
+        
+        # Transitions
+        self.merge_transition_var = ctk.StringVar(value="None")
+        self.merge_transition_duration_var = ctk.StringVar(value="0.5")
+        
+        self.TRANSITIONS = ["None", "Random", "Fade Black", "Fade White", "Crossfade", "Wipe Left", "Wipe Right", "Slide Left", "Slide Right"]
 
         # Drag-and-drop state
         self._drag_start_index: int | None = None
@@ -639,9 +653,81 @@ class VideoLengthTool(ctk.CTk):
         )
         self.merge_trim_checkbox.pack(side="left")
 
+        # Mute Source
+        ctk.CTkCheckBox(
+            trim_options_frame, text="🔇 Tắt toàn bộ sound (source)", variable=self.merge_mute_var, font=ctk.CTkFont(size=12)
+        ).pack(side="left", padx=15)
+
+        # Image Duration
+        ctk.CTkLabel(trim_options_frame, text="⏱️ Ảnh (giây):").pack(side="left", padx=(15, 5))
+        ctk.CTkEntry(
+            trim_options_frame, textvariable=self.merge_image_duration_var, width=50
+        ).pack(side="left")
+
+        # Audio Container (Music + Voice Side-by-Side)
+        audio_container = ctk.CTkFrame(options_frame, fg_color="transparent")
+        audio_container.grid(row=3, column=0, columnspan=3, sticky="ew", padx=5, pady=(5, 5))
+        audio_container.grid_columnconfigure(0, weight=1)
+        audio_container.grid_columnconfigure(1, weight=1)
+
+        # --- Music Section (Left) ---
+        music_frame = ctk.CTkFrame(audio_container, fg_color="#404040", corner_radius=6)
+        music_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=0)
+        
+        music_header = ctk.CTkFrame(music_frame, fg_color="transparent")
+        music_header.pack(fill="x", pady=2, padx=5)
+        
+        ctk.CTkLabel(music_header, text="🎵 Nhạc nền", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        
+        # Compact buttons
+        ctk.CTkButton(music_header, text="Del", width=40, height=22, fg_color="#8b0000", command=self._merge_remove_music).pack(side="right", padx=1)
+        ctk.CTkButton(music_header, text="Add", width=40, height=22, fg_color="#1f7a1f", command=self._merge_add_music).pack(side="right", padx=1)
+        ctk.CTkButton(music_header, text="⬇", width=25, height=22, command=self._merge_music_move_down).pack(side="right", padx=1)
+        ctk.CTkButton(music_header, text="⬆", width=25, height=22, command=self._merge_music_move_up).pack(side="right", padx=1)
+
+        self.merge_music_listbox = tk.Listbox(
+            music_frame, height=3, selectmode=tk.SINGLE, bg="#2b2b2b", fg="white",
+            selectbackground="#1f538d", font=("Segoe UI", 9), borderwidth=0, highlightthickness=0
+        )
+        self.merge_music_listbox.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # --- Voice Section (Right) ---
+        voice_frame = ctk.CTkFrame(audio_container, fg_color="#404040", corner_radius=6)
+        voice_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=0)
+        
+        voice_header = ctk.CTkFrame(voice_frame, fg_color="transparent")
+        voice_header.pack(fill="x", pady=2, padx=5)
+        
+        ctk.CTkLabel(voice_header, text="🗣️ Voice", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left")
+        
+        ctk.CTkButton(voice_header, text="Del", width=40, height=22, fg_color="#8b0000", command=self._merge_remove_voice).pack(side="right", padx=1)
+        ctk.CTkButton(voice_header, text="Add", width=40, height=22, fg_color="#1f7a1f", command=self._merge_add_voice).pack(side="right", padx=1)
+        ctk.CTkButton(voice_header, text="⬇", width=25, height=22, command=self._merge_voice_move_down).pack(side="right", padx=1)
+        ctk.CTkButton(voice_header, text="⬆", width=25, height=22, command=self._merge_voice_move_up).pack(side="right", padx=1)
+
+        self.merge_voice_listbox = tk.Listbox(
+            voice_frame, height=3, selectmode=tk.SINGLE, bg="#2b2b2b", fg="white",
+            selectbackground="#1f538d", font=("Segoe UI", 9), borderwidth=0, highlightthickness=0
+        )
+        self.merge_voice_listbox.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # --- Transition & Effects Row ---
+        effects_frame = ctk.CTkFrame(options_frame, fg_color="transparent")
+        effects_frame.grid(row=5, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
+        
+        ctk.CTkLabel(effects_frame, text="✨ Hiệu ứng:").pack(side="left")
+        ctk.CTkComboBox(
+            effects_frame, values=self.TRANSITIONS, variable=self.merge_transition_var, width=120
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkLabel(effects_frame, text="⏱️ Thời lượng (s):").pack(side="left", padx=(10, 5))
+        ctk.CTkEntry(
+            effects_frame, textvariable=self.merge_transition_duration_var, width=50
+        ).pack(side="left")
+
         # ========== PROGRESS AND RUN ==========
         action_frame = ctk.CTkFrame(main_frame, corner_radius=8)
-        action_frame.grid(row=3, column=0, sticky="ew", pady=5)
+        action_frame.grid(row=5, column=0, sticky="ew", pady=5)
         action_frame.grid_columnconfigure(0, weight=1)
 
         self.merge_progress_bar = ctk.CTkProgressBar(
@@ -668,7 +754,7 @@ class VideoLengthTool(ctk.CTk):
 
         # ========== LOG ==========
         merge_log_frame = ctk.CTkFrame(main_frame, corner_radius=8)
-        merge_log_frame.grid(row=4, column=0, sticky="nsew", pady=5)
+        merge_log_frame.grid(row=6, column=0, sticky="nsew", pady=5)
         merge_log_frame.grid_columnconfigure(0, weight=1)
         merge_log_frame.grid_rowconfigure(1, weight=1)
 
@@ -686,7 +772,9 @@ class VideoLengthTool(ctk.CTk):
     def _merge_add_videos(self) -> None:
         """Add videos to merge list."""
         filetypes = [
+            ("Media files", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.wmv *.flv *.jpg *.jpeg *.png"),
             ("Video files", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.wmv *.flv"),
+            ("Image files", "*.jpg *.jpeg *.png"),
             ("All files", "*.*"),
         ]
         paths = filedialog.askopenfilenames(title="Chọn video để ghép", filetypes=filetypes)
@@ -803,6 +891,101 @@ class VideoLengthTool(ctk.CTk):
         if path:
             self.merge_output_path_var.set(path)
 
+    def _merge_add_music(self) -> None:
+        """Add music files to merge playlist."""
+        filetypes = [
+            ("Audio files", "*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma"),
+            ("All files", "*.*"),
+        ]
+        paths = filedialog.askopenfilenames(title="Chọn nhạc nền", filetypes=filetypes)
+        if not paths:
+            return
+        
+        for p in paths:
+            if p not in self.merge_music_files:
+                self.merge_music_files.append(p)
+                self.merge_music_listbox.insert("end", os.path.basename(p))
+
+    def _merge_remove_music(self) -> None:
+        """Remove selected music."""
+        selection = self.merge_music_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        if 0 <= idx < len(self.merge_music_files):
+            self.merge_music_files.pop(idx)
+            self.merge_music_listbox.delete(idx)
+
+    def _merge_music_move_up(self) -> None:
+        selection = self.merge_music_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        if idx > 0:
+            self.merge_music_files[idx], self.merge_music_files[idx-1] = self.merge_music_files[idx-1], self.merge_music_files[idx]
+            self.merge_music_listbox.delete(idx-1)
+            self.merge_music_listbox.insert(idx-1, os.path.basename(self.merge_music_files[idx-1]))
+            self.merge_music_listbox.delete(idx+1)
+            self.merge_music_listbox.insert(idx, os.path.basename(self.merge_music_files[idx]))
+            self.merge_music_listbox.selection_set(idx-1)
+
+    def _merge_music_move_down(self) -> None:
+        selection = self.merge_music_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        if idx < len(self.merge_music_files) - 1:
+            self.merge_music_files[idx], self.merge_music_files[idx+1] = self.merge_music_files[idx+1], self.merge_music_files[idx]
+            self.merge_music_listbox.delete(idx)
+            self.merge_music_listbox.insert(idx, os.path.basename(self.merge_music_files[idx])) # Re-insert current at lower pos logic is tricky with delete.
+            # Simpler update whole list
+            self.merge_music_listbox.delete(0, "end")
+            for p in self.merge_music_files:
+                self.merge_music_listbox.insert("end", os.path.basename(p))
+            self.merge_music_listbox.selection_set(idx+1)
+
+    # --- Voice List Callbacks ---
+    def _merge_add_voice(self) -> None:
+        """Add voice files to merge playlist."""
+        filetypes = [
+            ("Audio files", "*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma"),
+            ("All files", "*.*"),
+        ]
+        paths = filedialog.askopenfilenames(title="Chọn file giọng đọc", filetypes=filetypes)
+        if not paths: return
+        for p in paths:
+            if p not in self.merge_voice_files:
+                self.merge_voice_files.append(p)
+                self.merge_voice_listbox.insert("end", os.path.basename(p))
+
+    def _merge_remove_voice(self) -> None:
+        selection = self.merge_voice_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        if 0 <= idx < len(self.merge_voice_files):
+            self.merge_voice_files.pop(idx)
+            self.merge_voice_listbox.delete(idx)
+
+    def _merge_voice_move_up(self) -> None:
+        selection = self.merge_voice_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        if idx > 0:
+            self.merge_voice_files[idx], self.merge_voice_files[idx-1] = self.merge_voice_files[idx-1], self.merge_voice_files[idx]
+            self.merge_voice_listbox.delete(idx-1)
+            self.merge_voice_listbox.insert(idx-1, os.path.basename(self.merge_voice_files[idx-1]))
+            self.merge_voice_listbox.delete(idx+1)
+            self.merge_voice_listbox.insert(idx, os.path.basename(self.merge_voice_files[idx]))
+            self.merge_voice_listbox.selection_set(idx-1)
+
+    def _merge_voice_move_down(self) -> None:
+        selection = self.merge_voice_listbox.curselection()
+        if not selection: return
+        idx = selection[0]
+        if idx < len(self.merge_voice_files) - 1:
+            self.merge_voice_files[idx], self.merge_voice_files[idx+1] = self.merge_voice_files[idx+1], self.merge_voice_files[idx]
+            self.merge_voice_listbox.delete(0, "end")
+            for p in self.merge_voice_files:
+                self.merge_voice_listbox.insert("end", os.path.basename(p))
+            self.merge_voice_listbox.selection_set(idx+1)
+
     def _on_merge_encoder_change(self, value: str) -> None:
         """Handle merge encoder selection change."""
         for key, (_, display, _) in self.ENCODER_OPTIONS.items():
@@ -853,12 +1036,17 @@ class VideoLengthTool(ctk.CTk):
     def _merge_run(self) -> None:
         """Run the merge operation."""
         if not self.merge_video_files:
-            messagebox.showerror("Error", "Vui lòng thêm video để ghép.")
+            messagebox.showerror("Error", "Vui lòng thêm video/ảnh để ghép.")
             return
 
         if len(self.merge_video_files) < 2:
-            messagebox.showerror("Error", "Cần ít nhất 2 video để ghép.")
-            return
+            # Allow 1 file if loop/convert? But strictly 'merge' implies >= 2.
+            # But maybe user wants to convert 1 image to video + music. Allow >= 1?
+            # Existing logic was < 2. Let's keep it but maybe loose for images?
+            # User said "Merge clip".
+            if len(self.merge_video_files) < 2:
+                messagebox.showerror("Error", "Cần ít nhất 2 file để ghép (hoặc dùng Video Length tab cho 1 file).")
+                return
 
         output_path = self.merge_output_path_var.get().strip()
         if not output_path:
@@ -871,154 +1059,507 @@ class VideoLengthTool(ctk.CTk):
                 messagebox.showerror("Error", f"File không tồn tại: {path}")
                 return
 
-        # Start processing in background thread
+        # Start processing
         self.merge_run_button.configure(state="disabled")
         self._merge_update_progress(0, "Đang xử lý...")
 
-        # Get trim option state
+        # Gather main parameters
         trim_enabled = self.merge_trim_var.get()
+        mute_source = self.merge_mute_var.get()
+        music_files = self.merge_music_files.copy()
+        voice_files = self.merge_voice_files.copy()
+        
+        mute_source = self.merge_mute_var.get()
+        music_files = self.merge_music_files.copy()
+        voice_files = self.merge_voice_files.copy()
+        
+        # Transition params
+        transition_type = self.merge_transition_var.get()
+        try:
+            transition_dur = float(self.merge_transition_duration_var.get())
+            if transition_dur < 0: raise ValueError
+        except ValueError:
+            transition_dur = 0.5
+        
+        try:
+            image_duration = float(self.merge_image_duration_var.get())
+            if image_duration <= 0: raise ValueError
+        except ValueError:
+            image_duration = 5.0
 
         thread = threading.Thread(
             target=self._merge_worker,
-            args=(self.merge_video_files.copy(), output_path, trim_enabled),
+            args=(self.merge_video_files.copy(), output_path, trim_enabled, mute_source, 
+                  music_files, voice_files, image_duration, transition_type, transition_dur),
             daemon=True,
         )
         thread.start()
 
-    def _merge_worker(self, video_files: list[str], output_path: str, trim_enabled: bool = False) -> None:
-        """Worker thread for merging videos."""
+    def _merge_worker(self, video_files: list[str], output_path: str, 
+                      trim_enabled: bool, mute_source: bool, 
+                      music_files: list[str], voice_files: list[str], 
+                      image_duration: float, transition_type: str, transition_dur: float) -> None:
+        """Worker thread for merging videos/images."""
         tmp_dir = None
-        trimmed_files: list[str] = []
+        processed_files: list[str] = []
 
         try:
-            self._merge_append_log("🎬 Bắt đầu ghép video...")
-            self._merge_append_log(f"📁 Số lượng video: {len(video_files)}")
-            for idx, path in enumerate(video_files, start=1):
-                self._merge_append_log(f"   {idx}. {os.path.basename(path)}")
-            self._merge_append_log(f"📤 Output: {output_path}")
-
-            if trim_enabled:
-                self._merge_append_log("✂️ Chế độ cắt đầu/cuối: BẬT (cắt 1s đầu và 1s cuối mỗi video)")
-            else:
-                self._merge_append_log("✂️ Chế độ cắt đầu/cuối: TẮT")
-
+            self._merge_append_log("🎬 Bắt đầu ghép media...")
+            self._merge_append_log(f"📁 Số lượng file: {len(video_files)}")
+            
+            # Resolve Random Transition
+            actual_transition = transition_type
+            if transition_type == "Random":
+                import random
+                choices = [t for t in self.TRANSITIONS if t not in ["None", "Random"]]
+                actual_transition = random.choice(choices)
+                self._merge_append_log(f"🎲 Random selected: {actual_transition}")
+            
+            self._merge_append_log(f"✨ Hiệu ứng: {actual_transition} ({transition_dur}s)")
+            self._merge_append_log(f"✂️ Cut 1s đầu/cuối: {'BẬT' if trim_enabled else 'TẮT'}")
+            
+            # ... Log music/voice ...
+            
             encoder, preset, crf = self._get_merge_encoder_config()
             self._merge_append_log(f"🔧 Encoder: {encoder} | Preset: {preset} | Quality: {crf}")
+
+            # 1. Analyze inputs to determine target resolution/fps
+            self._merge_update_progress(0.05, "Đang phân tích media...")
+            target_width, target_height = 1920, 1080
+            target_fps = 30.0
+            
+            # Find first video to reference
+            ref_video = None
+            for f in video_files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext not in ['.jpg', '.jpeg', '.png']:
+                    ref_video = f
+                    break
+            
+            if ref_video:
+                # Probe it
+                try:
+                    ffprobe = get_ffprobe_executable()
+                    cmd = [
+                        ffprobe, "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height,r_frame_rate",
+                        "-of", "csv=p=0", ref_video
+                    ]
+                    out = subprocess.check_output(cmd, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0).decode().strip()
+                    parts = out.split(',')
+                    if len(parts) >= 3:
+                        target_width = int(parts[0])
+                        target_height = int(parts[1])
+                        fps_parts = parts[2].split('/')
+                        if len(fps_parts) == 2:
+                            target_fps = float(fps_parts[0]) / float(fps_parts[1])
+                        else:
+                            target_fps = float(parts[2])
+                except Exception as e:
+                    self._merge_append_log(f"⚠️ Không thể probe video {os.path.basename(ref_video)}, dùng default 1080p.")
+            
+            self._merge_append_log(f"🎯 Target Format: {target_width}x{target_height} @ {target_fps:.2f}fps")
 
             # Create temp directory
             base_dir = os.path.dirname(output_path) or os.getcwd()
             tmp_dir = tempfile.mkdtemp(prefix="merge_clips_", dir=base_dir)
             concat_file = os.path.join(tmp_dir, "concat_list.txt")
 
-            try:
-                # If trim enabled, create trimmed versions of videos first
-                if trim_enabled:
-                    self._merge_update_progress(0.05, "Đang cắt video...")
-                    self._merge_append_log("✂️ Đang cắt 1s đầu và 1s cuối mỗi video...")
+            # 2. Process segments (Trim, Loop Images, Normalize)
+            self._merge_update_progress(0.1, "Đang xử lý từng segment...")
+            
+            for idx, path in enumerate(video_files):
+                filename = os.path.basename(path)
+                seg_out = os.path.join(tmp_dir, f"seg_{idx:03d}.mp4")
+                
+                # Check if image
+                ext = os.path.splitext(path)[1].lower()
+                is_image = ext in ['.jpg', '.jpeg', '.png']
+                
+                msg = f"Processing {idx+1}/{len(video_files)}: {filename}" + (" (Image)" if is_image else "")
+                self._merge_append_log(msg)
+                self._merge_update_progress(0.1 + (0.4 * idx / len(video_files)), msg)
 
-                    files_to_merge = []
-                    for idx, video_path in enumerate(video_files):
-                        trimmed_path = os.path.join(tmp_dir, f"trimmed_{idx}.mp4")
-                        self._trim_video(video_path, trimmed_path, trim_start=1.0, trim_end=1.0)
-                        files_to_merge.append(trimmed_path)
-                        trimmed_files.append(trimmed_path)
-                        progress = 0.05 + (0.25 * (idx + 1) / len(video_files))
-                        self._merge_update_progress(progress, f"Đang cắt video {idx + 1}/{len(video_files)}...")
+                self._process_segment(
+                    input_path=path,
+                    output_path=seg_out,
+                    is_image=is_image,
+                    trim_enabled=trim_enabled,
+                    mute_source=mute_source,
+                    image_duration=image_duration,
+                    width=target_width,
+                    height=target_height,
+                    fps=target_fps,
+                    encoder_config=(encoder, preset, crf),
+                    transition_type=actual_transition,
+                    transition_dur=transition_dur
+                )
+                processed_files.append(seg_out)
 
-                    self._merge_append_log(f"✅ Đã cắt xong {len(files_to_merge)} video")
-                else:
-                    files_to_merge = video_files
-
-                self._merge_update_progress(0.35, "Đang chuẩn bị ghép...")
-
-                # Check if all videos have same codec/resolution for fast concat
-                # Note: If trimmed, they should all be compatible now
-                can_fast_concat = not trim_enabled and self._check_can_fast_concat(files_to_merge)
-
-                if can_fast_concat:
-                    self._merge_append_log("✅ Video tương thích - sử dụng fast concat")
-                    self._merge_fast_concat(files_to_merge, output_path, concat_file)
-                else:
-                    if trim_enabled:
-                        self._merge_append_log("📎 Ghép các video đã cắt...")
-                    else:
-                        self._merge_append_log("⚠️ Video khác định dạng - cần re-encode")
-                    self._merge_reencode(files_to_merge, output_path, concat_file, encoder, preset, crf)
-
-                self._merge_append_log("✅ Hoàn thành!")
-                self._merge_update_progress(1.0, "✅ Hoàn thành!")
-                messagebox.showinfo("Thành công", "Video đã được ghép thành công!")
-
-            finally:
-                # Cleanup
+            # 3. Concatenate (or Xfade)
+            self._merge_update_progress(0.6, "Đang ghép (concatenation)...")
+            
+            # Decide: Fast Concat (Dip/None) or Xfade
+            is_xfade = actual_transition not in ["None", "Fade Black", "Fade White"]
+            
+            concat_out = os.path.join(tmp_dir, "concat_result.mp4")
+            
+            if is_xfade:
+                self._merge_append_log(f"🔄 Using Xfade: {actual_transition}")
                 try:
-                    if os.path.exists(concat_file):
-                        os.remove(concat_file)
-                    # Remove trimmed files
-                    for tf in trimmed_files:
-                        if os.path.exists(tf):
-                            os.remove(tf)
-                    if tmp_dir and os.path.isdir(tmp_dir):
-                        os.rmdir(tmp_dir)
-                except Exception:
-                    pass
+                    self._merge_with_xfade(
+                        processed_files, concat_out, actual_transition, transition_dur, 
+                        target_width, target_height, target_fps, (encoder, preset, crf)
+                    )
+                except Exception as e:
+                    self._merge_append_log(f"⚠️ Xfade failed completely: {e}")
+                    self._merge_append_log("🔄 Falling back to standard concat (no transitions)...")
+                    if os.path.exists(concat_out):
+                        os.remove(concat_out)
+                    is_xfade = False # Flag to fall through to else block
+
+            if not is_xfade:
+                # Standard Concat (Fast)
+                # Create list file
+                with open(concat_file, "w", encoding="utf-8") as f:
+                    for p in processed_files:
+                        escaped = os.path.abspath(p).replace("\\", "/").replace("'", "'\\''")
+                        f.write(f"file '{escaped}'\n")
+
+                cmd_concat = [
+                    self.ffmpeg_executable, "-y", "-f", "concat", "-safe", "0",
+                    "-i", concat_file, "-c", "copy", concat_out
+                ]
+                subprocess.run(cmd_concat, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+
+            # 4. Add Music / Finalize
+            self._merge_update_progress(0.8, "Đang finalize âm thanh...")
+            
+            final_inputs = ["-i", concat_out]
+            # Track stream mapping
+            # 0:v - Video
+            # 0:a - Source Audio (if not muted)
+            # Music might be next
+            # Voice might be next
+            
+            stream_indices = {
+                "source": 0,
+                "music": -1,
+                "voice": -1
+            }
+            next_input_idx = 1
+            
+            # --- Prepare Music ---
+            if music_files:
+                music_list_file = os.path.join(tmp_dir, "music_list.txt")
+                with open(music_list_file, "w", encoding="utf-8") as f:
+                    for m in music_files:
+                        escaped = os.path.abspath(m).replace("\\", "/").replace("'", "'\\''")
+                        f.write(f"file '{escaped}'\n")
+                
+                combined_music = os.path.join(tmp_dir, "combined_music.m4a")
+                cmd_music = [
+                    self.ffmpeg_executable, "-y", "-f", "concat", "-safe", "0",
+                    "-i", music_list_file, "-c:a", "aac", "-b:a", "192k", "-vn", combined_music
+                ]
+                subprocess.run(cmd_music, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                
+                # No Loop: Just add input
+                final_inputs.extend(["-i", combined_music])
+                stream_indices["music"] = next_input_idx
+                next_input_idx += 1
+                
+            # --- Prepare Voice ---
+            if voice_files:
+                voice_list_file = os.path.join(tmp_dir, "voice_list.txt")
+                with open(voice_list_file, "w", encoding="utf-8") as f:
+                    for v in voice_files:
+                        escaped = os.path.abspath(v).replace("\\", "/").replace("'", "'\\''")
+                        f.write(f"file '{escaped}'\n")
+                
+                combined_voice = os.path.join(tmp_dir, "combined_voice.m4a")
+                cmd_voice = [
+                    self.ffmpeg_executable, "-y", "-f", "concat", "-safe", "0",
+                    "-i", voice_list_file, "-c:a", "aac", "-b:a", "192k", "-vn", combined_voice
+                ]
+                subprocess.run(cmd_voice, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                
+                # No Loop
+                final_inputs.extend(["-i", combined_voice])
+                stream_indices["voice"] = next_input_idx
+                next_input_idx += 1
+            
+            # --- Mixing ---
+            audio_streams_to_mix = []
+            
+            if not mute_source:
+                 audio_streams_to_mix.append(f"{stream_indices['source']}:a")
+            
+            if stream_indices["music"] != -1:
+                audio_streams_to_mix.append(f"{stream_indices['music']}:a")
+                
+            if stream_indices["voice"] != -1:
+                audio_streams_to_mix.append(f"{stream_indices['voice']}:a")
+                
+            maps = ["-map", "0:v"] # Always map video
+            filter_complex = []
+            
+            if not audio_streams_to_mix:
+                 # No audio at all (muted, no music, no voice)
+                 pass
+            elif len(audio_streams_to_mix) == 1:
+                # Just one stream, map it directly
+                maps.extend(["-map", audio_streams_to_mix[0], "-shortest"])
+            else:
+                # Mix multiple streams
+                mix_inputs = "".join([f"[{s}]" for s in audio_streams_to_mix])
+                filter_complex.append(f"{mix_inputs}amix=inputs={len(audio_streams_to_mix)}:duration=first[aout]")
+                maps.extend(["-map", "[aout]"])
+
+            cmd_final = [
+                self.ffmpeg_executable, "-y",
+                *final_inputs
+            ]
+            
+            if filter_complex:
+                cmd_final.extend(["-filter_complex", "".join(filter_complex)])
+            
+            cmd_final.extend(maps)
+            cmd_final.extend(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"])
+            cmd_final.append(output_path)
+            
+            self._merge_append_log("💾 Saving final output...")
+            subprocess.run(cmd_final, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+
+            self._merge_append_log("✅ Hoàn thành!")
+            self._merge_update_progress(1.0, "✅ Hoàn thành!")
+            messagebox.showinfo("Thành công", "Video đã được ghép thành công!")
 
         except Exception as exc:
             self._merge_append_log(f"❌ Lỗi: {exc}")
+            import traceback
+            traceback.print_exc()
             self._merge_update_progress(0, "❌ Lỗi")
             messagebox.showerror("Error", f"Lỗi khi ghép video: {exc}")
         finally:
             self.merge_run_button.configure(state="normal")
+            # Cleanup
+            try:
+                if tmp_dir and os.path.exists(tmp_dir):
+                    import shutil
+                    shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
 
-    def _trim_video(self, input_path: str, output_path: str, trim_start: float = 1.0, trim_end: float = 1.0) -> None:
-        """
-        Trim video by removing trim_start seconds from beginning and trim_end seconds from end.
-        """
-        # Get video duration first
-        duration = self._get_media_duration(input_path)
-
-        if duration <= (trim_start + trim_end):
-            # Video too short, just copy it
-            self._merge_append_log(f"⚠️ Video quá ngắn để cắt: {os.path.basename(input_path)}")
-            cmd = [
-                self.ffmpeg_executable,
-                "-y",
-                "-i", input_path,
-                "-c", "copy",
-                output_path
+    def _process_segment(self, input_path: str, output_path: str, is_image: bool,
+                         trim_enabled: bool, mute_source: bool, image_duration: float,
+                         width: int, height: int, fps: float, encoder_config: tuple,
+                         transition_type: str, transition_dur: float) -> None:
+        """Video processing unit with fallback for HW failures."""
+        
+        # Inner function to build command (keeps things DRY for retry)
+        def build_cmd(curr_config):
+            enc, pre, q = curr_config
+            vf_filters = [
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                f"fps={fps}",
+                "format=yuv420p"
             ]
-        else:
-            # Calculate new duration
-            new_duration = duration - trim_start - trim_end
+            
+            # Handle Fade Black/White
+            segment_duration = image_duration
+            if not is_image:
+                 input_d = self._get_media_duration(input_path)
+                 if trim_enabled and input_d > 2.0:
+                     segment_duration = input_d - 2.0
+                 else:
+                     segment_duration = input_d
+            
+            if transition_type in ["Fade Black", "Fade White"]:
+                color = "white" if "White" in transition_type else "black"
+                # Fade In Start
+                vf_filters.append(f"fade=t=in:st=0:d={transition_dur}:color={color}")
+                # Fade Out End
+                if segment_duration > transition_dur:
+                     start_fade_out = segment_duration - transition_dur
+                     vf_filters.append(f"fade=t=out:st={start_fade_out}:d={transition_dur}:color={color}")
+            
+            cmd = [self.ffmpeg_executable, "-y"]
+            
+            if is_image:
+                cmd.extend(["-loop", "1", "-i", input_path])
+                cmd.extend(["-t", str(image_duration)])
+            else:
+                start_offset = 0.0
+                duration = None
+                if trim_enabled:
+                    input_dur = self._get_media_duration(input_path)
+                    if input_dur > 2.0:
+                        start_offset = 1.0
+                        duration = input_dur - 2.0
+                    else:
+                        self._merge_append_log(f"⚠️ Clip too short to trim: {os.path.basename(input_path)}")
+                
+                if start_offset > 0:
+                    cmd.extend(["-ss", str(start_offset)])
+                
+                cmd.extend(["-i", input_path])
+                
+                if duration is not None:
+                    cmd.extend(["-t", str(duration)])
 
-            # Use re-encode for precise trimming
-            encoder, preset, crf = self._get_merge_encoder_config()
+            # Encoder args
+            if enc == "libx264":
+                cmd.extend(["-c:v", "libx264", "-preset", pre, "-crf", str(q)])
+            elif enc == "h264_nvenc":
+                cmd.extend(["-c:v", "h264_nvenc", "-preset", pre, "-cq", str(q), "-rc", "vbr"])
+            elif enc == "h264_qsv":
+                cmd.extend(["-c:v", "h264_qsv", "-preset", pre, "-global_quality", str(q)])
+            elif enc == "h264_amf":
+                 cmd.extend(["-c:v", "h264_amf", "-quality", "balanced", "-rc", "vbr_latency"])
 
-            cmd = [
-                self.ffmpeg_executable,
-                "-y",
-                "-ss", str(trim_start),  # Start after trim_start seconds
-                "-i", input_path,
-                "-t", str(new_duration),  # Duration (not end time)
-                "-threads", "0",
-            ]
+            cmd.extend(["-vf", ",".join(vf_filters)])
 
-            # Add encoder args
-            if encoder == "libx264":
-                cmd.extend(["-c:v", "libx264", "-preset", preset, "-crf", str(crf)])
-            elif encoder == "h264_nvenc":
-                cmd.extend(["-c:v", "h264_nvenc", "-preset", preset, "-cq", str(crf), "-rc", "vbr"])
-            elif encoder == "h264_qsv":
-                cmd.extend(["-c:v", "h264_qsv", "-preset", preset, "-global_quality", str(crf)])
-            elif encoder == "h264_amf":
-                quality = "speed" if preset in ["p1", "p2"] else "balanced"
-                cmd.extend(["-c:v", "h264_amf", "-quality", quality, "-rc", "vbr_latency",
-                           "-qp_i", str(crf), "-qp_p", str(crf)])
+            if mute_source:
+                 cmd.append("-an")
+            else:
+                if is_image:
+                    pass 
+                else:
+                    cmd.extend(["-c:a", "aac", "-b:a", "192k"])
 
-            cmd.extend(["-c:a", "aac", "-b:a", "192k", output_path])
+            if is_image and not mute_source:
+                 cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100", "-shortest"])
+                 cmd.extend(["-c:a", "aac", "-b:a", "192k"])
 
-        subprocess.run(cmd, check=True,
-                      creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+            cmd.extend(["-threads", "0"])
+            cmd.append(output_path)
+            return cmd
+
+        # Try 1: Use requested encoder
+        try:
+            cmd = build_cmd(encoder_config)
+            # self._merge_append_log(f"Running segment: {' '.join(cmd)}")
+            subprocess.run(cmd, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+        except subprocess.CalledProcessError as e:
+            # ... (Retry logic, no change needed here actually but context check)
+            enc_name = encoder_config[0]
+            if enc_name != "libx264":
+                self._merge_append_log(f"⚠️ Retrying with CPU...")
+                fallback_config = ("libx264", "veryfast", 23) 
+                cmd_fallback = build_cmd(fallback_config)
+                subprocess.run(cmd_fallback, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+            else:
+                self._merge_append_log(f"❌ FFmpeg error: {e}")
+                raise e
+
+    def _merge_with_xfade(self, inputs: list[str], output_path: str, transition_type: str, 
+                          duration: float, width: int, height: int, fps: float, 
+                          encoder_config: tuple) -> None:
+        """Merge videos using complex xfade filter."""
+        # Need exact duration of each input to calculate offsets
+        offsets = []
+        cum_duration = 0.0
+        
+        # Map transition name to ffmpeg xfade transition
+        # "Crossfade" -> "fade"? "distance"? 'fade' is technically mix. 'dissolve' is common.
+        # xfade supports: fade, wipeleft, wiperight, slideleft, slideright, etc.
+        t_map = {
+            "Crossfade": "fade",
+            "Wipe Left": "wipeleft",
+            "Wipe Right": "wiperight",
+            "Slide Left": "slideleft",
+            "Slide Right": "slideright"
+        }
+        xfade_trans = t_map.get(transition_type, "fade")
+        
+        # Probe durations
+        real_inputs = []
+        for inp in inputs:
+            try:
+                d = self._get_media_duration(inp)
+                real_inputs.append((inp, d))
+            except Exception:
+                continue
+                
+        if not real_inputs: raise ValueError("No inputs for xfade")
+        
+        # Calculate offsets
+        # offset 0 = 0 (implicitly)
+        # offset 1 = dur 0 - trans_dur
+        # offset 2 = offset 1 + dur 1 - trans_dur
+        
+        curr_offset = 0.0
+        for i in range(len(real_inputs) - 1): # Last clip doesn't have an offset calculation for next
+             dur = real_inputs[i][1]
+             # Next clip starts at:
+             next_start = curr_offset + dur - duration
+             offsets.append(next_start)
+             curr_offset = next_start
+        
+        # Build Filter Graph
+        # [0][1]xfade=...[v1];[v1][2]xfade...[v2]...
+        fg = []
+        
+        # Inputs
+        cmd = [self.ffmpeg_executable, "-y"]
+        for inp, _ in real_inputs:
+            cmd.extend(["-i", inp])
+            
+        last_v_label = "0:v"
+        # Since inputs are normalized, we assume audio matches.
+        # Xfade only affects video. Audio needs 'acrossfade' for crossfade.
+        # Or simple mix. 'acrossfade' is better but complex graph.
+        # For simplicity, let's use amix (already done in main flow? No, that's music).
+        # We need to mix the audio of clips.
+        # For simple 'fade' transition, we want audio crossfade.
+        # Let's try simple audio concat first? No, gaps.
+        # We will use 'acrossfade' for audio parallel to xfade.
+        
+        last_a_label = "0:a"
+        
+        for i in range(1, len(real_inputs)):
+            # Video Xfade
+            next_v_label = f"v{i}"
+            fg.append(f"[{last_v_label}][{i}:v]xfade=transition={xfade_trans}:duration={duration}:offset={offsets[i-1]}[{next_v_label}]")
+            last_v_label = next_v_label
+            
+            # Audio Crossfade
+            next_a_label = f"a{i}"
+            fg.append(f"[{last_a_label}][{i}:a]acrossfade=d={duration}[{next_a_label}]")
+            last_a_label = next_a_label
+            
+        # FORCE PIXEL FORMAT TO YUV420P AFTER XFADE
+        # This fixes 4294967274 crashes where complex filters output incompatible formats
+        fg.append(f"[{last_v_label}]format=yuv420p[vout]")
+        last_v_label = "vout"
+            
+        cmd.extend(["-filter_complex", ";".join(fg)])
+        cmd.extend(["-map", f"[{last_v_label}]", "-map", f"[{last_a_label}]"])
+        
+        # Encoder args
+        # Reuse logic... simplify for now, always re-encode
+        # Since Xfade is failing, let's be VERY conservative:
+        # 1. Use libx264 (CPU)
+        # 2. Use 1 thread
+        
+        cmd.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "23"])
+        
+        # Audio
+        cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        cmd.extend(["-threads", "1"]) # Thread limit for stability
+        cmd.append(output_path)
+        
+        # self._merge_append_log(f"Running Xfade: {' '.join(cmd)}")
+        try:
+            subprocess.run(cmd, check=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+        except subprocess.CalledProcessError as e:
+             # Retry logic is redundant if we're already being conservative, 
+             # but let's keep it simple: if this fails, we just propagate up 
+             # and let _merge_worker catch it to fallback to Concat.
+             self._merge_append_log(f"❌ Xfade Error: {e}")
+             raise e
 
     def _check_can_fast_concat(self, video_files: list[str]) -> bool:
         """Check if videos can be concatenated without re-encoding."""
